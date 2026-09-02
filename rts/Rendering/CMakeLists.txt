@@ -152,6 +152,7 @@ set(sources_engine_Rendering
 
 if (ENABLE_AOE2_UNIT_RENDERER)
 	list(APPEND sources_engine_Rendering
+		"${CMAKE_CURRENT_SOURCE_DIR}/Aoe2/Aoe2UnitGameplayRenderBridge.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Aoe2/Aoe2UnitRenderer.cpp"
 	)
 endif ()

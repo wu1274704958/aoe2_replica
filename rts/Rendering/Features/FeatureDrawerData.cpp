@@ -10,6 +10,9 @@
 #include "Rendering/LuaObjectDrawer.h"
 #include "Rendering/ShadowHandler.h"
 #include "Rendering/Common/ModelDrawerHelpers.h"
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.h"
+#endif
 
 #include "System/Misc/TracyDefs.h"
 
@@ -203,6 +206,15 @@ void CFeatureDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 			default: { assert(false); } break;
 		}
 	}
+
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	const bool nativeModelVisible =
+		f->HasDrawFlag(DrawFlags::SO_OPAQUE_FLAG) ||
+		f->HasDrawFlag(DrawFlags::SO_ALPHAF_FLAG);
+	CAoe2UnitGameplayRenderBridge::SetNativeModelVisible(f, nativeModelVisible);
+	if (CAoe2UnitGameplayRenderBridge::ReplacesNativeModel(f))
+		f->ResetDrawFlag();
+#endif
 
 	if (f->alwaysUpdateMat || (f->drawFlag > DrawFlags::SO_NODRAW_FLAG && f->drawFlag < DrawFlags::SO_DRICON_FLAG)) {
 		f->UpdateTransform(f->drawPos, false);

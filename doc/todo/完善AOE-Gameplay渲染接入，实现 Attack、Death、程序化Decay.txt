@@ -1,0 +1,321 @@
+• 请在 D:\code\RecoilEngine 中继续完善 AOE Gameplay 渲染接入，实现 Attack、Death、程序化 Decay 以及尸体 CFeature 接
+  管，并优先解决显存占用问题。
+
+  ## 当前状态
+
+  - 当前位于 aoe_dev 分支。
+  - 之前完成的 AOE Unit Renderer 与 Gameplay Unit bridge 修改已经暂存。
+  - 当前工作区干净，暂存区内容视为本次实现基线。
+  - 不要 reset、覆盖或重新暂存现有修改；本次新增修改保持未暂存，除非明确要求。
+  - AOE 缓存位于 D:\code\RecoilEngine\cont\aoe2de_cache。
+  - 弓手 Projectile 资源位于：
+    D:\code\RecoilEngine\cont\aoe2de_cache\graphics\p_arrow。
+
+  ## 一、优先优化显存占用
+
+  当前渲染器将 Main、Shadow、Player-color 全部上传为四通道纹理，显存开销不可扩展。请先完成以下优化：
+
+  - Main Sprite 保持 RGBA8。
+  - Shadow 改为真正的单通道 GL_R8。
+  - Player-color mask 改为真正的单通道 GL_R8。
+  - 不加载 DecayA 的 JSON、主图、阴影或玩家色纹理。
+  - 更新 Shader、纹理上传、采样和资源释放逻辑。
+  - 验证 OpenGL unpack alignment、纹理格式和状态恢复。
+
+  Player-color 当前同时使用颜色值和 Alpha 判断有效区域。转换为 R8 前必须先确认缓存编码，不得直接丢弃 Alpha 信息。推
+  荐在 CPU 上传阶段重新编码为：
+
+  0     = 非玩家色区域
+  1..8  = 玩家色子色阶
+
+  Shader 根据单通道值完成 mask 判断和色阶还原。
+
+  请输出优化前后的理论及实测显存占用。不得只减少 CPU Bitmap 通道而仍在 GPU 使用 RGBA8。
+
+  ## 二、扩展动画系统
+
+  新增以下动画状态：
+
+  - IdleA：循环。
+  - WalkA：循环。
+  - AttackA：单次播放。
+  - DeathA：单次播放，结束后固定在最后一帧。
+  - Procedural Decay：不加载 DecayA，使用 DeathA 最后一帧渐隐。
+
+  渲染器需要明确区分循环动画和单次动画。Death 不允许通过取模重新跳回第一帧：
+
+  frame = min(floor(time * fps), frameCount - 1);
+
+  避免在 bridge 中硬编码动画长度。应由 renderer 提供动画 FPS、帧数、时长和 Attack release frame 等只读元数据。
+
+  动画优先级建议为：
+
+  Death > Attack > Walk > Idle
+
+  ## 三、接入 Attack
+
+  Attack 必须由真实的 Recoil Weapon 发射周期驱动，不能仅根据 Attack Command 或是否拥有目标播放，以免出现无效攻击动
+  作。
+
+  弓手 manifest 中的 frame_delay 表示 Projectile 释放帧。需要保证：
+
+  1. Weapon 真正进入可发射状态时开始 AttackA。
+  2. Attack 播放到 release frame 时，Projectile 正式生成。
+  3. Attack 播完后根据实时速度恢复 Walk 或 Idle。
+  4. 连射、取消目标、移动攻击和单位死亡不会留下错误动画状态。
+
+  优先评估使用 Recoil 的 salvoWindup 与 AOE frame_delay 对齐，不得为了视觉同步重复模拟伤害或创建第二套 Gameplay
+  Projectile。
+
+  ## 四、使用 CFeature 管理 Death 和程序化 Decay
+
+  CFeature 应成为 AOE 尸体阶段的 Gameplay 宿主，保留 Recoil 原生的：
+
+  - 碰撞与阻挡。
+  - 选择。
+  - 回收。
+  - 复活。
+  - 受伤与销毁。
+  - LOS、视锥和生命周期。
+  - 尸体位置、速度和朝向。
+
+  AOE Unit 必须配置合法的 corpse FeatureDef。原生 Feature 模型只在 AOE 资源及 bridge 有效时隐藏，关闭 AOE 功能后应恢
+  复原生表现。
+
+  ### Render instance 所有权转移
+
+  优先让 CUnit 和其尸体 CFeature 顺序复用同一个 AOE render instance：
+
+  CUnit owner
+      → Unit death / wreck created
+      → CFeature owner
+      → Feature destroyed
+      → renderer handle destroyed
+
+  约束：
+
+  - CUnit 和 CFeature 不能同时拥有或销毁同一个 handle。
+  - 所有权应集中在 bridge 的 render record 中。
+  - 不得通过最近位置、相同 UnitDef 或事件顺序猜测 Unit–Feature 对应关系。
+  - 应增加可靠的 handoff 身份或专用 render-safe 事件，例如：
+    RenderUnitWreckCreated(unit, feature)。
+
+  - 回调中只复制 ID、代次和快照，不执行 OpenGL 操作。
+  - 必须正确处理 Unit/Feature ID 复用。
+
+  ### Death 与 Decay
+
+  建议生命周期：
+
+  Feature 接管实例
+      → DeathA 播放一次
+      → 固定 DeathA 最后一帧
+      → 尸体保持
+      → 程序化 Alpha 渐隐
+      → 同步删除 CFeature
+      → 销毁 render instance
+
+  程序化 Decay 必须与同步 Gameplay 生命周期一致，不能只在 unsynced renderer 中变透明而让不可见的 CFeature 继续阻挡或
+  可被回收。
+
+  需要明确：
+
+  - 自然腐烂的开始帧和结束帧。
+  - 渐隐结束时由同步 Gameplay 删除 Feature。
+  - 回收时可结合 reclaimLeft 渐隐。
+  - 复活时取消渐隐，避免与新 Unit 重叠。
+  - 突然摧毁和完全回收时正确清理。
+  - Alpha 同时作用于主 Sprite 和阴影。
+
+  ## 五、评估并选择 Projectile 方案
+
+  弓手的 AOE Projectile 资源已经存在于：
+
+  cont/aoe2de_cache/graphics/p_arrow
+
+  请先对比：
+
+  1. 保留 Recoil 原生 Projectile 渲染。
+  2. 使用 Recoil Projectile 作为 Gameplay/弹道宿主，仅用 p_arrow 替换其视觉。
+
+  如果两种方案工作量接近，直接接入 p_arrow。不得另外模拟一套 Projectile 轨迹；位置、速度、碰撞、伤害和销毁必须继续由
+  Recoil 原生 Projectile 管理。
+
+  若接入 p_arrow，要求：
+
+  - 建立独立的 AOE Projectile render bridge，不让 Unit renderer 直接持有 Projectile。
+  - 使用 RenderProjectileCreated/Destroyed 管理生命周期。
+  - 根据 Recoil Projectile 的插值位置和速度确定 Sprite 位置及方向。
+  - 支持 LOS、视锥裁剪、批处理和实例化。
+  - 映射成功后才隐藏原生 Projectile。
+  - 资源失败或关闭功能时恢复原生渲染。
+  - 不产生逐 Projectile Draw Call。
+  - Attack release frame 与 Recoil Projectile 实际创建时刻一致。
+
+  如果 p_arrow 接入明显扩大范围，请给出源码和资源证据，保留原生 Projectile，并为下一阶段预留稳定接口。
+
+  ## 六、调整渲染时序
+
+  Feature 接入后，需要重新检查当前更新顺序。推荐拆分为：
+
+  1. Bridge Prepare：处理 Unit、Feature、Projectile 生命周期和所有权转移。
+  2. UnitDrawer 更新。
+  3. FeatureDrawer 更新。
+  4. Bridge Update：读取最终 drawPos、可见性和 Alpha。
+  5. AOE Renderer 更新并重建批次。
+
+  目标是避免：
+
+  - Feature 创建首帧原生模型与 AOE Sprite 重叠。
+  - Unit 到 Feature 交接时闪烁。
+  - 使用上一帧 Feature drawPos。
+  - 原生模型已隐藏但 AOE 实例尚未可见。
+
+  ## 七、测试场景
+
+  扩展现有本地测试场景，至少验证：
+
+  - 弓手 Idle、Walk 和 Attack。
+  - Attack release frame 与 Projectile 生成同步。
+  - Projectile 飞行方向和位置正确。
+  - Unit 死亡后无缝转为 CFeature。
+  - Death 只播放一次并固定最后一帧。
+  - 不加载 DecayA。
+  - 最后一帧按同步生命周期渐隐。
+  - 回收、摧毁、复活和自然腐烂。
+  - Unit/Feature handle 无重复释放或泄漏。
+  - 关闭 AOE bridge 后恢复原生 Unit、Feature 和 Projectile。
+  - 1、100、1000 个单位以及批量死亡场景。
+  - 输出 CPU、GPU、Draw Call、实例数、纹理数量和显存估算。
+
+  ## 八、工程约束
+
+  - 遵循 RecoilEngine 的 AGENTS.md、AI_POLICY.md、代码风格和构建规则。
+  - 保持 renderer 不直接依赖 Gameplay 类型。
+  - Gameplay 适配集中在 bridge。
+  - 不提交缓存、构建产物、日志和测试运行目录。
+  - 不修改暂存区中的基线状态。
+  - 不提交代码，除非明确要求。
+  - 每个阶段完成后构建并运行验证。
+  - 如果发现设计阻碍，先给出证据和最小调整方案，不要绕过生命周期或复制 Gameplay 状态。
+
+  ## 验收标准
+
+  - RecoilEngine 能正常编译和启动。
+  - Shadow 与 Player-color 在 GPU 中实际使用 R8。
+  - 不读取或加载任何 DecayA 资源。
+  - Attack、Death 和程序化 Decay 表现正确。
+  - CFeature 成为尸体 Gameplay 宿主。
+  - Unit 与 Feature 能安全转移同一个 render instance。
+  - 尸体仍支持 Recoil 原生回收、复活、碰撞和选择。
+  - Attack 与 Projectile 释放时刻一致。
+  - 若 p_arrow 工作量与原生方案接近，则已完成其视觉接入。
+  - 不产生逐 Unit、逐 Feature 或逐 Projectile Draw Call。
+  - 无新增闪烁、重影、句柄泄漏、重复销毁或明显 OpenGL 状态泄漏。
+
+  ## 九、CFeature 尸体方案调研结论与实现约束
+
+  调研结论：继续复用 Recoil 标准 CFeature 作为 AOE 尸体的同步 Gameplay 宿主，不新增
+  CAoeFeature 派生类型。
+
+  CFeature 当前会在 Initialize 中根据 FeatureDef 加载共享模型资源，为每个 Feature 初始化
+  LocalModel，并注册到 FeatureDrawer。虽然 CFeature 没有被声明为 final，但 Initialize、Update、
+  AddBuildPower 等核心方法不是虚函数；FeatureHandler 固定从 FeatureMemPool 分配 CFeature，内存池
+  元素大小、creg 元数据和销毁路径也均绑定到 CFeature。通过继承覆盖模型创建会要求改造多态工厂、
+  内存池、存档和全部销毁路径，改动大且没有必要。
+
+  推荐采用组合方案：
+
+  - CFeature 继续负责碰撞、阻挡、选择、回收、受伤、LOS 和同步生命周期。
+  - AOE corpse FeatureDef 使用 customParams 标记，并允许受控的无原生模型 Feature。
+  - FeatureDef 设置 resurrectable=0；CFeature 因 udef 为空会自然拒绝复活。
+  - AOE appearance 从 FeatureDef customParams.aoe2_unit_id 获取，不依赖 feature->udef。
+  - 无模型 Feature 必须显式配置 footprint、碰撞体、选择体、radius/height 或等价边界，不能依赖
+    LocalModel 提供 Gameplay 和可见性尺寸。
+  - 普通 Feature 仍保持原有的模型要求；只有显式 aoe2_corpse=true 的 Feature 可以走无模型路径。
+
+  AOE render instance 不存放在 CUnit 或 CFeature 中，统一由 unsynced bridge 的 render record 拥有。
+  CUnit 和 CFeature 只能顺序引用同一个 record，不能同时拥有或释放 renderer handle。Unit 创建 wreck
+  时必须通过可靠的 RenderUnitWreckCreated(unit, feature) handoff 事件或等价的稳定身份完成转移，
+  禁止根据位置、UnitDef 或事件相邻关系猜测。
+
+  推荐的生命周期：
+
+  CUnit owner
+      -> Unit death / wreck CFeature created
+      -> 同一个 render instance 转移给 CFeature
+      -> DeathA 单次播放并固定最后一帧
+      -> 最后一帧按同步 corpse 生命周期和 reclaimLeft 渐隐
+      -> 同步 Gameplay 删除 CFeature
+      -> bridge 销毁 render instance
+
+  后续设计明确不加载 DecayA。程序化 Decay 只复用 DeathA 最后一帧，通过 tint alpha 同时淡出
+  主 Sprite 和阴影。自然腐烂的开始、结束和最终 Feature 删除必须由同步 Gameplay 决定；禁止只在
+  unsynced renderer 中隐藏仍然存在且继续阻挡的 CFeature。
+
+  ## 十、本阶段实现选择与边界
+
+  本阶段按上述组合方案实现，不引入 CFeature 派生类。CFeature 增加同步的腐烂起止帧，起止帧由
+  aoe2_death_frames、aoe2_corpse_hold_frames、aoe2_corpse_fade_frames 配置；自然腐烂结束时由
+  FeatureHandler 的同步更新路径删除 Feature。resurrectable=0 仍由原生机制禁止复活，回收、碰撞、
+  选择和资源价值不在渲染桥内复制。
+
+  Unit 到尸体的关联采用“源 Unit ID + Unit 地址生命周期令牌”。CFeature 在 Initialize 仍能访问
+  parentObj 时只记录这两个值，RenderFeatureCreated 再把它们复制到事件队列；Bridge Prepare 在同一批
+  生命周期事件中将原 Unit 槽位里的 renderer handle 移交给 Feature 槽位。地址只作相等比较且从不解引用，
+  因而不依赖位置、UnitDef、事件相邻顺序或最近邻搜索。未生成受支持尸体的 Unit 在事件批次结束后正常销毁
+  renderer handle。
+
+  为满足关闭 AOE bridge 后仍有原生可见回退，本地验证 FeatureDef 暂时保留一个轻量原生 model；Bridge
+  启用并完成映射后才隐藏它。受控无模型 Feature 仍是后续可选优化，但它与“关闭 bridge 恢复原生 Feature”
+  不能同时成立，因此本阶段不修改 FeatureHandler 对空 modelName 的通用约束。
+
+  Attack 由 CWeapon 的真实 reloadStatus 变化触发，不由测试计时器伪造。renderer 对外暴露每个 appearance
+  的 fps、帧数、时长、循环属性和 manifest.dat.combat.frame_delay；Attack/Death 都按资源元数据播放，
+  Death 到末尾后钳制最后一帧。DecayA 不在动画槽和预加载表中。
+
+  p_arrow 调研结论：资源完整（32 方向、每方向 11 帧、30 FPS，含 Main 与 Shadow），但接入它需要新增独立
+  Projectile bridge、生命周期事件、插值位置/速度转朝向、LOS/隐藏回退和独立批处理；保留 Recoil 原生
+  Projectile 则无需新增渲染代码，两者工作量并不接近。依照第五节的判定条件，本阶段保留原生 Projectile，
+  只确保 Attack 的 release 元数据与 WeaponDef windup 可对齐；p_arrow 视觉替换留到独立后续阶段。
+
+  渲染时序拆成 Prepare -> UnitDrawer -> FeatureDrawer -> Bridge Update -> AOE Renderer Update。Prepare 只处理
+  生命周期与所有权，Update 才读取两类原生 Drawer 已计算完成的 drawPos、LOS/视锥可见性和 Feature Alpha，
+  避免尸体创建首帧重影和上一帧位置。
+
+  ## 十一、实现与验证结果
+
+  已完成：
+
+  - IdleA、WalkA、AttackA、DeathA 四类动画资源接入；AttackA 和 DeathA 为非循环采样。
+  - renderer 不声明、不查找、不预加载 DecayA；尸体使用 DeathA 最后一帧程序化渐隐。
+  - Main 保持 RGBA8，Shadow 与 Player-color mask 在上传前重打包为单通道并以 GL_R8 驻留。
+  - Attack 由原生 CWeapon reloadStatus 的真实变化触发；测试 WeaponDef 的 windup 与资源 releaseTime 对齐。
+  - CUnit 析构创建 wreck 时，把同一个 renderer handle 精确移交给 CFeature，无位置匹配和额外 Draw Call。
+  - 标记为 aoe2_corpse 的 CFeature 按同步帧维护 Death、hold、fade，并在 fade 结束后由 FeatureHandler 删除。
+  - reclaimLeft 与原生 drawAlpha 会共同乘入程序化 alpha；自然删除与外部删除均通过 RenderFeatureDestroyed
+    释放 renderer handle。
+  - 诊断日志增加 Unit/Feature 实例分项、纹理显存估算，以及尸体 handoff 的源 ID 和 decay 帧区间。
+
+  Windows MinGW RelWithDebInfo 实跑 100 Unit 的验证结果：
+
+  - Renderer、Bridge、Feature、UnitDrawer、FeatureDrawer 和 WorldDrawer 全部编译通过并成功启动测试场景。
+  - 第 900 帧销毁 10 Unit；第 901 帧记录 90 Unit + 10 Feature，live instance 始终为 100，证明所有权转移
+    没有销毁并重建 renderer instance。
+  - 10 个尸体的同步 decay 区间均为 [1051, 1111]；第 1110 帧仍有 10 Feature，第 1140 帧为 0 Feature，
+    bridge live instance 从 110 正确回落到重新创建 Unit 后的 100。
+  - 100 个可见实例稳定为 2 个 batch / 2 个 Draw Call；bridge 更新约 0.003--0.009 ms，renderer 更新约
+    0.013--0.026 ms，GPU draw 约 0.008--0.022 ms（仅代表本机空白测试场景）。
+  - 当前四类动画纹理显存诊断为约 194.5 MiB；该数值已包含 Shadow/Player mask 的 R8 优化，未包含 DecayA。
+  - 日志未发现新增 OpenGL error、LuaRules error、断言、崩溃或重复句柄释放。
+
+  本地测试场景必须加载 Recoil 基础的 Lua unit script framework；否则 Lua UnitScript 不会绑定，Killed
+  不会完成，Unit 会停留在死亡等待状态且不会析构生成 CFeature。该依赖已补入本地、被忽略的测试包，
+  不属于产品运行时代码改动。
+
+  未在本阶段完成：
+
+  - p_arrow 的 AOE sprite 化；继续使用 Recoil 原生 Projectile。
+  - 可复活尸体；AOE corpse 明确配置 resurrectable=0。
+  - 完全无原生模型的 CFeature；为了关闭 bridge 后可回退，本阶段测试 FeatureDef 保留轻量模型。
+  - 1000 Unit 批量死亡的视觉验收、回收中的交互验收以及开关热切换视觉验收，留给后续人工场景测试。

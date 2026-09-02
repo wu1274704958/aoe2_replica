@@ -3,6 +3,8 @@
 #ifndef _FEATURE_H
 #define _FEATURE_H
 
+#include <cstdint>
+
 #include "System/Misc/NonCopyable.h"
 
 #include "Sim/Objects/SolidObject.h"
@@ -129,6 +131,13 @@ public:
 	int lastReclaimFrame = 0;
 	int fireTime = 0;
 	int smokeTime = 0;
+	int aoe2DecayStartFrame = -1;
+	int aoe2DecayEndFrame = -1;
+
+	// Unsynced identity captured while a Unit wreck is created. Render adapters
+	// may use it for an exact one-shot ownership handoff; it is never dereferenced.
+	int renderSourceUnitId = -1;
+	std::uintptr_t renderSourceUnitToken = 0;
 
 	SResourcePack defResources = {0.0f, 1.0f};
 	SResourcePack resources = {0.0f, 1.0f};

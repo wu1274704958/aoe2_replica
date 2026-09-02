@@ -104,6 +104,7 @@ struct Layer {
 	int atlasHeight = 0;
 	std::vector<Frame> frames;
 	GLuint texture = 0;
+	std::uint64_t textureBytes = 0;
 	bool usable = false;
 };
 
@@ -133,8 +134,9 @@ struct Animation {
 struct Appearance {
 	std::string id;
 	std::uint32_t generation = 1;
-	std::array<Animation, 2> animations;
-	std::array<bool, 2> loaded{false, false};
+	std::array<Animation, 4> animations;
+	std::array<bool, 4> loaded{false, false, false, false};
+	int attackReleaseFrame = 0;
 };
 
 struct Instance {
@@ -207,9 +209,9 @@ vec3 playerColor(uint player) {
 void main() {
 	vec4 base = texture(diffuseTex, oUv);
 	if (base.a < 0.01) discard;
-	vec4 mask = texture(playerColorTex, oUv);
-	if (mask.a > 0.5) {
-		float subShade = mix(0.48, 1.18, clamp(mask.r * 255.0, 0.0, 7.0) / 7.0);
+	float packedMask = texture(playerColorTex, oUv).r * 255.0;
+	if (packedMask >= 0.5) {
+		float subShade = mix(0.48, 1.18, clamp(packedMask - 1.0, 0.0, 7.0) / 7.0);
 		float diffuseLuma = dot(base.rgb, vec3(0.2126, 0.7152, 0.0722));
 		base.rgb = playerColor(oPlayer) * subShade * clamp(diffuseLuma * 1.35 + 0.18, 0.35, 1.35);
 	}
@@ -232,7 +234,12 @@ void main() {
 
 std::size_t AnimationIndex(Aoe2UnitAnimationSlot slot)
 {
-	return (slot == Aoe2UnitAnimationSlot::WalkA) ? 1u : 0u;
+	return static_cast<std::size_t>(slot);
+}
+
+bool AnimationLoops(Aoe2UnitAnimationSlot slot)
+{
+	return slot == Aoe2UnitAnimationSlot::IdleA || slot == Aoe2UnitAnimationSlot::WalkA;
 }
 
 std::size_t NextCapacity(std::size_t requested)
@@ -341,11 +348,37 @@ void ResolveMissingFrames(Layer& layer, int directionCount, int framesPerDirecti
 	}
 }
 
-GLuint LoadTexture(const std::filesystem::path& path, bool linear)
+enum class TextureEncoding {
+	Rgba,
+	ShadowR8,
+	PlayerColorR8,
+};
+
+GLuint LoadTexture(const std::filesystem::path& path, bool linear, TextureEncoding encoding, std::uint64_t& textureBytes)
 {
-	CBitmap bitmap;
-	if (!bitmap.Load(path.string(), 1.0f, 4, GL_UNSIGNED_BYTE, false))
+	CBitmap source;
+	if (!source.Load(path.string(), 1.0f, 4, GL_UNSIGNED_BYTE, false))
 		throw std::runtime_error("failed to load texture: " + path.string());
+
+	CBitmap packed;
+	const CBitmap* upload = &source;
+	if (encoding != TextureEncoding::Rgba) {
+		packed.Alloc(source.xsize, source.ysize, 1, GL_UNSIGNED_BYTE);
+		const auto* sourcePixels = source.GetRawMem();
+		auto* packedPixels = packed.GetRawMem();
+		const std::size_t pixelCount = static_cast<std::size_t>(source.xsize) * source.ysize;
+		for (std::size_t i = 0; i < pixelCount; ++i) {
+			if (encoding == TextureEncoding::ShadowR8) {
+				packedPixels[i] = sourcePixels[i * 4];
+			} else {
+				const std::uint8_t alpha = sourcePixels[i * 4 + 3];
+				packedPixels[i] = (alpha >= 128)
+					? static_cast<std::uint8_t>(std::min<std::uint8_t>(7, sourcePixels[i * 4]) + 1)
+					: 0;
+			}
+		}
+		upload = &packed;
+	}
 
 	GL::TextureCreationParams params;
 	params.reqNumLevels = 1;
@@ -354,7 +387,13 @@ GLuint LoadTexture(const std::filesystem::path& path, bool linear)
 	params.minFilter = linear ? GL_LINEAR : GL_NEAREST;
 	params.magFilter = linear ? GL_LINEAR : GL_NEAREST;
 	params.wrapModes = std::array<int32_t, 3>{GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE};
-	return bitmap.CreateTexture(params);
+	GLint oldUnpackAlignment = 4;
+	glGetIntegerv(GL_UNPACK_ALIGNMENT, &oldUnpackAlignment);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	const GLuint texture = upload->CreateTexture(params);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
+	textureBytes = upload->GetMemSize();
+	return texture;
 }
 
 void DeleteLayerTexture(Layer& layer)
@@ -562,10 +601,12 @@ Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPat
 	ResolveMissingFrames(animation.main, animation.directionCount, animation.framesPerDirection);
 	ResolveMissingFrames(animation.shadow, animation.directionCount, animation.framesPerDirection);
 	ResolveMissingFrames(animation.playerColor, animation.directionCount, animation.framesPerDirection);
-	animation.main.texture = LoadTexture(animation.main.imagePath, true);
-	animation.playerColor.texture = LoadTexture(animation.playerColor.imagePath, false);
+	animation.main.texture = LoadTexture(animation.main.imagePath, true, TextureEncoding::Rgba, animation.main.textureBytes);
+	animation.playerColor.texture = LoadTexture(
+		animation.playerColor.imagePath, false, TextureEncoding::PlayerColorR8, animation.playerColor.textureBytes);
 	if (animation.shadow.usable)
-		animation.shadow.texture = LoadTexture(animation.shadow.imagePath, true);
+		animation.shadow.texture = LoadTexture(
+			animation.shadow.imagePath, true, TextureEncoding::ShadowR8, animation.shadow.textureBytes);
 	return animation;
 }
 
@@ -576,6 +617,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			return {static_cast<std::uint32_t>(i), appearances[i]->generation};
 	}
 
+	std::unique_ptr<Appearance> appearance;
 	try {
 		const auto manifestPath = cacheRoot / "units" / unitId / "manifest.json";
 		simdjson::dom::parser parser;
@@ -589,10 +631,16 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 		simdjson::dom::object manifestAnimations;
 		if (const auto error = document["animations"].get_object().get(manifestAnimations); error != simdjson::SUCCESS)
 			throw std::runtime_error("manifest animations are missing or invalid: " + std::string(simdjson::error_message(error)));
-		auto appearance = std::make_unique<Appearance>();
+		appearance = std::make_unique<Appearance>();
 		appearance->id = unitId;
+		std::int64_t attackReleaseFrame = 0;
+		if (document["dat"]["combat"]["frame_delay"].get_int64().get(attackReleaseFrame) == simdjson::SUCCESS)
+			appearance->attackReleaseFrame = static_cast<int>(std::max<std::int64_t>(0, attackReleaseFrame));
+		static constexpr std::array<std::string_view, 4> animationNames = {
+			"idleA", "walkA", "attackA", "deathA",
+		};
 		for (std::size_t i = 0; i < appearance->animations.size(); ++i) {
-			const std::string name = (i == 0) ? "idleA" : "walkA";
+			const std::string name(animationNames[i]);
 			simdjson::dom::object entry;
 			if (const auto error = manifestAnimations[name].get_object().get(entry); error != simdjson::SUCCESS)
 				throw std::runtime_error(name + " manifest entry is missing or invalid: " + std::string(simdjson::error_message(error)));
@@ -602,10 +650,22 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			appearance->animations[i] = LoadAnimation(configPath, name);
 			appearance->loaded[i] = true;
 		}
+		for (const auto& animation : appearance->animations) {
+			diagnostics.textureBytes += animation.main.textureBytes;
+			diagnostics.textureBytes += animation.shadow.textureBytes;
+			diagnostics.textureBytes += animation.playerColor.textureBytes;
+		}
 		const auto index = static_cast<std::uint32_t>(appearances.size());
 		appearances.push_back(std::move(appearance));
 		return {index, appearances.back()->generation};
 	} catch (const std::exception& error) {
+		if (appearance != nullptr) {
+			for (auto& animation : appearance->animations) {
+				DeleteLayerTexture(animation.main);
+				DeleteLayerTexture(animation.shadow);
+				DeleteLayerTexture(animation.playerColor);
+			}
+		}
 		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload unit %s: %s", unitId.c_str(), error.what());
 		return {};
 	}
@@ -615,7 +675,8 @@ Aoe2InstanceHandle Aoe2RendererImpl::Create(const Aoe2UnitInstanceDesc& desc)
 {
 	if (!desc.appearance || desc.appearance.index >= appearances.size() ||
 		appearances[desc.appearance.index] == nullptr ||
-		appearances[desc.appearance.index]->generation != desc.appearance.generation)
+		appearances[desc.appearance.index]->generation != desc.appearance.generation ||
+		AnimationIndex(desc.animation) >= appearances[desc.appearance.index]->animations.size())
 		return {};
 
 	std::uint32_t index = 0;
@@ -737,7 +798,10 @@ void Aoe2RendererImpl::RebuildBatches()
 			continue;
 		++diagnostics.visibleInstances;
 		const int direction = DirectionForHeading(instance.heading, animation.directionCount);
-		const int frameNumber = static_cast<int>(std::floor(instance.animationTime * animation.fps)) % animation.framesPerDirection;
+		const int sampledFrame = static_cast<int>(std::floor(instance.animationTime * animation.fps));
+		const int frameNumber = AnimationLoops(instance.animation)
+			? sampledFrame % animation.framesPerDirection
+			: std::min(sampledFrame, animation.framesPerDirection - 1);
 		const int frameIndex = direction * animation.framesPerDirection + frameNumber;
 		const float scale = instance.scale * pixelsToWorld;
 		const float3 axisX = camera->GetRight() * scale;
@@ -847,9 +911,9 @@ void Aoe2RendererImpl::Update()
 	const auto now = std::chrono::steady_clock::now();
 	if (diagnosticsEnabled && now - lastDiagnostics >= std::chrono::seconds(1)) {
 		const float fps = (globalRendering->lastFrameTime > 0.0f) ? 1000.0f / globalRendering->lastFrameTime : 0.0f;
-		LOG_L(L_INFO, "[Aoe2UnitRenderer] instances=%u visible=%u batches=%u draws=%u upload=%lluB CPU(update/draw)=%.3f/%.3fms GPU=%.3fms FPS=%.1f",
+		LOG_L(L_INFO, "[Aoe2UnitRenderer] instances=%u visible=%u batches=%u draws=%u upload=%lluB textures=%.1fMiB CPU(update/draw)=%.3f/%.3fms GPU=%.3fms FPS=%.1f",
 			diagnostics.liveInstances, diagnostics.visibleInstances, diagnostics.batches, diagnostics.drawCalls,
-			static_cast<unsigned long long>(diagnostics.uploadedBytes), diagnostics.cpuUpdateMs,
+			static_cast<unsigned long long>(diagnostics.uploadedBytes), diagnostics.textureBytes / (1024.0 * 1024.0), diagnostics.cpuUpdateMs,
 			diagnostics.cpuDrawMs, diagnostics.gpuDrawMs, fps);
 		lastDiagnostics = now;
 	}
@@ -1128,9 +1192,39 @@ void CAoe2UnitRenderer::DrawStatic()
 #endif
 }
 
+bool CAoe2UnitRenderer::IsAvailable()
+{
+	return renderer != nullptr;
+}
+
 Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadAppearance(const std::string& unitId)
 {
 	return (renderer != nullptr) ? renderer->Preload(unitId) : Aoe2AppearanceHandle{};
+}
+
+bool CAoe2UnitRenderer::GetAnimationInfo(
+	Aoe2AppearanceHandle appearance,
+	Aoe2UnitAnimationSlot animationSlot,
+	Aoe2UnitAnimationInfo& info
+)
+{
+	if (renderer == nullptr || !appearance || appearance.index >= renderer->appearances.size())
+		return false;
+	const auto& appearancePtr = renderer->appearances[appearance.index];
+	const std::size_t index = AnimationIndex(animationSlot);
+	if (appearancePtr == nullptr || appearancePtr->generation != appearance.generation ||
+		index >= appearancePtr->animations.size() || !appearancePtr->loaded[index])
+		return false;
+
+	const auto& animation = appearancePtr->animations[index];
+	info.fps = animation.fps;
+	info.frameCount = static_cast<std::uint32_t>(animation.framesPerDirection);
+	info.durationSeconds = animation.framesPerDirection / animation.fps;
+	info.loop = AnimationLoops(animationSlot);
+	info.releaseTimeSeconds = (animationSlot == Aoe2UnitAnimationSlot::AttackA)
+		? std::clamp(appearancePtr->attackReleaseFrame / animation.fps, 0.0f, info.durationSeconds)
+		: 0.0f;
+	return true;
 }
 
 Aoe2InstanceHandle CAoe2UnitRenderer::CreateInstance(const Aoe2UnitInstanceDesc& desc)
@@ -1156,7 +1250,7 @@ bool CAoe2UnitRenderer::SetTransform(Aoe2InstanceHandle handle, const float3& po
 bool CAoe2UnitRenderer::SetAnimation(Aoe2InstanceHandle handle, Aoe2UnitAnimationSlot animation, float playbackTime, float playbackSpeed)
 {
 	auto* instance = (renderer != nullptr) ? renderer->Get(handle) : nullptr;
-	if (instance == nullptr) return false;
+	if (instance == nullptr || AnimationIndex(animation) > AnimationIndex(Aoe2UnitAnimationSlot::DeathA)) return false;
 	instance->animation = animation;
 	instance->animationTime = std::max(0.0f, playbackTime);
 	instance->playbackSpeed = playbackSpeed;

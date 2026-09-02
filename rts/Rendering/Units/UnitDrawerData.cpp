@@ -13,6 +13,9 @@
 #include "Game/UI/MiniMap.h"
 #include "Rendering/Common/ModelDrawerHelpers.h"
 #include "Rendering/Units/UnitDrawer.h"
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.h"
+#endif
 #include "Rendering/Models/IModelParser.h"
 #include "Rendering/LuaObjectDrawer.h"
 #include "Rendering/IconHandler.h"
@@ -439,6 +442,18 @@ void CUnitDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 		}
 
 	}
+
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	const bool nativeModelVisible =
+		u->HasDrawFlag(DrawFlags::SO_OPAQUE_FLAG) ||
+		u->HasDrawFlag(DrawFlags::SO_ALPHAF_FLAG);
+	CAoe2UnitGameplayRenderBridge::SetNativeModelVisible(u, nativeModelVisible);
+	if (CAoe2UnitGameplayRenderBridge::ReplacesNativeModel(u)) {
+		const bool isIcon = u->GetIsIcon();
+		u->ResetDrawFlag();
+		u->SetIsIcon(isIcon);
+	}
+#endif
 }
 
 bool CUnitDrawerData::DrawAsIconByDistance(const CUnit* unit, const float sqUnitCamDist) const

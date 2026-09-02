@@ -23,6 +23,7 @@
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Rendering/Units/UnitDrawer.h"
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.h"
 #include "Rendering/Aoe2/Aoe2UnitRenderer.h"
 #endif
 #include "Rendering/IPathDrawer.h"
@@ -142,6 +143,7 @@ void CWorldDrawer::InitPost() const
 		CUnitDrawer::InitStatic();
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
 		CAoe2UnitRenderer::InitStatic();
+		CAoe2UnitGameplayRenderBridge::InitStatic();
 #endif
 		// see ::InitPre
 		// CFeatureDrawer::InitStatic();
@@ -189,6 +191,7 @@ void CWorldDrawer::Kill()
 
 	CFeatureDrawer::KillStatic(gu->globalReload);
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2UnitGameplayRenderBridge::KillStatic();
 	CAoe2UnitRenderer::KillStatic();
 #endif
 	CUnitDrawer::KillStatic(gu->globalReload); // depends on unitHandler, cubeMapHandler
@@ -227,11 +230,15 @@ void CWorldDrawer::Update(bool newSimFrame)
 	// (it updates unitdrawpos which is used for maximized minimap too)
 	// unitDrawer->Update();
 	// lineDrawer.UpdateLineStipple();
-	CUnitDrawer::UpdateStatic();
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2UnitGameplayRenderBridge::PrepareStatic();
+#endif
+	CUnitDrawer::UpdateStatic();
+	CFeatureDrawer::UpdateStatic();
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2UnitGameplayRenderBridge::UpdateStatic();
 	CAoe2UnitRenderer::UpdateStatic();
 #endif
-	CFeatureDrawer::UpdateStatic();
 	projectileDrawer->UpdateDrawFlags();
 
 	if (newSimFrame) {

@@ -1,0 +1,390 @@
+    请将现有 AOE Unit 渲染能力接入 D:\code\RecoilEngine 的原生 Gameplay Unit 系统，完成从 Recoil Gameplay Unit 到 AOE
+  渲染实例的最小闭环。
+
+  ## 背景
+
+  - RecoilEngine 当前位于 aoe_dev 分支。
+  - AOE Unit 渲染器已经完成并能够运行：
+      - 加载 cont/aoe2de_cache 中的 Unit 资源。
+      - 支持 IdleA、WalkA、朝向、缩放、阵营色和阴影。
+      - 使用 Instanced Rendering 和批处理。
+      - 100、1,000、10,000 实例测试已通过。
+
+  - 当前测试单位由 Aoe2UnitTestCount 创建，仅属于 Render-only Test Grid，不是 Recoil Gameplay Unit。
+  - AOE 渲染层通过稳定的实例接口工作，不依赖 CUnit、寻路、编组或战斗代码。
+  - 下一阶段需要让 Recoil 原生 Gameplay Unit 驱动 AOE 渲染实例。
+  - 本阶段不移植或重新实现 gld 的 Gameplay 系统。
+
+  ## 核心目标
+
+  实现以下数据流：
+
+  Recoil UnitDef / CUnit
+          ↓
+  AOE Gameplay Render Bridge
+          ↓
+  CAoe2UnitRenderer Instance API
+          ↓
+  Instanced Sprite Rendering
+
+  Recoil 原生系统继续负责：
+
+  - Unit 创建和销毁。
+  - 世界位置和朝向。
+  - 移动命令和 CommandAI。
+  - MoveType 和路径跟随。
+  - 碰撞体积。
+  - 阵营、LOS 和可见性。
+  - 选择、命令、生命周期和同步状态。
+
+  AOE 模块只负责这些 Gameplay Unit 的视觉表现。
+
+  ## 一、先调研 Recoil 原生 Unit 生命周期
+
+  实施前先阅读项目的 AGENTS.md 和 AI_POLICY.md，并检查当前 Git 暂存区与工作区状态。
+
+  重点调研并标注关键文件、类型、函数和行号：
+
+  1. UnitDef 加载和自定义参数解析。
+  2. CUnit 的创建、初始化、更新和销毁流程。
+  3. UnitHandler 或对应 Unit 容器的生命周期管理。
+  4. CommandAI、MoveType、速度和朝向的更新来源。
+  5. UnitDrawer 如何获取可渲染 Unit。
+  6. Unit 的 LOS、Radar、Spectator 和 noDraw 逻辑。
+  7. Unit 创建/销毁是否有可复用的事件通知机制。
+  8. 渲染重载、地图重载和 globalReload 时的资源生命周期。
+  9. 哪些代码运行在同步模拟线程，哪些运行在非同步渲染线程。
+  10. 原生模型、选择框、血条和碰撞体之间的依赖关系。
+
+  必须先确定最小侵入的接入点，不能直接让 CAoe2UnitRenderer 读取或遍历 CUnit。
+
+  ## 二、设计独立的 Gameplay Render Bridge
+
+  新增独立桥接模块，例如：
+
+  Aoe2UnitGameplayRenderBridge
+
+  职责：
+
+  - 识别需要使用 AOE 外观的 UnitDef。
+  - 在 Gameplay Unit 创建后创建 AOE 渲染实例。
+  - 更新位置、朝向、动画、阵营色和可见性。
+  - 在 Gameplay Unit 销毁时销毁对应渲染实例。
+  - 在渲染器重载后重建映射。
+  - 控制原生 Unit 模型是否需要隐藏。
+
+  依赖方向必须保持：
+
+  Gameplay Bridge → AOE Renderer
+
+  禁止：
+
+  AOE Renderer → CUnit
+  AOE Renderer → UnitHandler
+  AOE Renderer → CommandAI
+
+  桥接层可以同时依赖 Gameplay 和 Renderer，但 Renderer 必须继续保持纯渲染接口。
+
+  ## 三、UnitDef 到 AOE 资源的映射
+
+  优先通过 UnitDef 的 customParams 配置映射，不要硬编码 UnitDef 名称或 AOE Unit ID。
+
+  建议支持类似配置，具体字段格式需结合 Recoil 实际 UnitDef 解析方式确认：
+
+  customParams = {
+      aoe2_unit_id = "u_arc_archer",
+      aoe2_scale = "1.0",
+      aoe2_player_color = "team",
+  }
+
+  至少支持：
+
+  - AOE 资源 Unit ID。
+  - 渲染缩放。
+  - 可选的地面高度偏移。
+  - 阵营色来源或固定 AOE Player Color。
+  - 是否隐藏原生模型。
+  - 可选的动画速度倍率。
+
+  映射要求：
+
+  - UnitDef 加载完成后只解析一次。
+  - 不允许逐帧查找字符串或解析 customParams。
+  - 同一 UnitDef 的 AOE Appearance 必须共享。
+  - 资源应在进入实际移动前预加载。
+  - 资源缺失时记录一次明确错误，并安全回退到原生模型或不创建 AOE 实例。
+
+  ## 四、生命周期映射
+
+  ### 创建
+
+  当映射 Unit 创建时：
+
+  1. 根据 UnitDef 查找已缓存的 AOE Appearance。
+  2. 创建一个 AOE Renderer Instance。
+  3. 初始化：
+      - 世界位置。
+      - 朝向。
+      - 缩放。
+      - 阵营色。
+      - Idle 动画。
+      - 可见性。
+
+  4. 保存 Gameplay Unit 与 Renderer Handle 的映射。
+
+  Renderer Handle 不允许直接写入同步 CUnit 状态，也不能参与序列化或网络同步。
+
+  建议桥接层维护非同步注册表，例如：
+
+  unitID + unitGeneration → Aoe2InstanceHandle
+
+  必须防止 Unit ID 复用导致旧 Handle 更新新 Unit。
+
+  ### 更新
+
+  每个渲染更新周期只遍历已映射的 AOE Gameplay Unit，不遍历无关 Unit。
+
+  同步更新：
+
+  - Unit 世界位置。
+  - Unit 朝向。
+  - Unit 缩放。
+  - 阵营色。
+  - 当前可见性。
+  - Idle/Walk 动画状态。
+  - 动画播放速度。
+
+  不得在模拟线程中执行 OpenGL 调用。若 Unit 生命周期事件发生在其他线程，应先记录轻量事件，再由渲染更新阶段处理。
+
+  ### 销毁
+
+  当 Unit 被销毁、回收或地图卸载时：
+
+  - 销毁对应 AOE Renderer Instance。
+  - 清理注册表。
+  - 不留下失效 Handle。
+  - 不访问已经释放的 CUnit。
+  - 正确处理 Renderer 先销毁、Gameplay 后销毁的顺序。
+
+  第一阶段只要求立即删除渲染实例，不要求实现 Death/Decay 动画，但需要考虑后续实现的可扩展性。
+
+  ## 五、位置和朝向转换
+
+  集中定义并说明以下规则：
+
+  - Recoil 世界位置使用 X/Z 地面平面、Y 向上。
+  - AOE Renderer 的 heading 0 对应世界 +Z。
+  - Recoil 内部 Heading 到弧度的转换方式。
+  - 旋转正方向。
+  - Unit 世界位置使用哪个锚点。
+  - 地形高度、碰撞中心和 Sprite 脚点之间的关系。
+  - 当前脚点以下渐进深度偏移仍属于 Renderer，不得写入 Gameplay 坐标。
+
+  不允许通过分散的魔法常量修正朝向。
+
+  Gameplay Unit 的位置必须保持真实值；任何视觉偏移只能在渲染层处理。
+
+  ## 六、Idle/Walk 动画映射
+
+  第一阶段只接入：
+
+  - IdleA
+  - WalkA
+
+  动画选择建议基于 Gameplay Unit 的实际水平速度，而不是仅判断是否存在 Move Command：
+
+  horizontalSpeed <= idleThreshold → IdleA
+  horizontalSpeed >= moveThreshold → WalkA
+
+  要求：
+
+  - 使用双阈值或迟滞，避免低速时 Idle/Walk 高频切换。
+  - 切换动画时明确是否重置时间。
+  - Walk 播放速度可按实际速度缩放，但必须限制合理范围。
+  - Unit 被阻挡、等待路径或速度为零时应回到 Idle。
+  - 不允许 Renderer 自己推断 Gameplay 状态。
+
+  Attack、Death、Decay、Build 和 Gather 动画留到后续阶段。
+
+  ## 七、原生模型隐藏策略
+
+  必须先调查 Recoil 原生 UnitDrawer 的行为，再决定如何隐藏映射 Unit 的原生模型。
+
+  需要保证隐藏原生模型后仍然保留：
+
+  - Unit 选择和 Picking。
+  - 命令接收。
+  - 碰撞体。
+  - LOS 和 Radar。
+  - 血条、选择框或其他必要 UI。
+  - Gameplay 同步状态。
+
+  不要直接设置 noDraw，除非确认它不会错误关闭选择、LOS、UI 或其他功能。
+
+  优先采用范围明确的“仅跳过原生模型提交”机制，并只对配置了 AOE 外观且成功创建 Renderer Instance 的 Unit 生效。
+
+  如果 AOE 资源加载失败，应恢复显示原生模型。
+
+  ## 八、可见性和信息安全
+
+  AOE Unit 的显示必须服从 Recoil 原生可见性规则，不能泄露战争迷雾中的敌方位置。
+
+  至少验证：
+
+  - 己方 Unit。
+  - LOS 内敌方 Unit。
+  - LOS 外敌方 Unit。
+  - Radar 状态。
+  - Spectator 全视野。
+  - Unit 被隐藏或销毁。
+  - 切换视角和队伍。
+
+  桥接层应复用 UnitDrawer 或引擎已有的可见性结果，不要独立实现一套不一致的 LOS 判断。
+
+  ## 九、性能要求
+
+  Gameplay 接入不得破坏现有实例化渲染性能。
+
+  要求：
+
+  - 更新复杂度为 O(M)，M 为已映射的 AOE Gameplay Unit 数量。
+  - 不逐帧遍历所有 UnitDef。
+  - 不逐帧查找资源字符串。
+  - 不逐 Unit 产生 Draw Call。
+  - 不逐帧分配临时容器。
+  - 不在更新路径同步读取磁盘。
+  - 相同 Appearance、动画和材质继续合批。
+  - 位置更新应复用现有实例 Buffer 和增量上传策略。
+  - Gameplay Bridge 的 CPU 时间应单独统计。
+  - 关闭桥接功能后不产生额外的 Unit 更新成本。
+
+  建议使用：
+
+  - UnitDef 级映射缓存。
+  - 按 Unit ID 索引的连续注册表。
+  - 创建/销毁事件维护活跃列表。
+  - 脏标记或变化检测。
+  - Appearance 预热和共享。
+
+  ## 十、运行时开关
+
+  新增独立运行时开关，例如：
+
+  Aoe2UnitGameplayBridge = 0/1
+
+  要求：
+
+  - 默认关闭。
+  - 必须依赖 AOE Renderer 已启用。
+  - 关闭后 Recoil 原有 Gameplay 和 Unit 渲染行为保持不变。
+  - Render-only Test Grid 与 Gameplay Bridge 可以分别控制。
+  - Gameplay 测试时应设置：
+
+  Aoe2UnitTestCount = 0
+
+  避免 Render-only 实例和真实 Gameplay Unit 混在一起。
+
+  ## 十一、最小 Gameplay 测试场景
+
+  扩展现有本地测试 Game，创建真正的 Recoil Gameplay Unit。
+
+  测试场景至少包括：
+
+  1. 通过标准 UnitDef 创建 AOE 映射 Unit。
+  2. Unit 可被选择。
+  3. Unit 可接收原生 Move Command。
+  4. Unit 使用 Recoil MoveType 和路径系统移动。
+  5. AOE Sprite 正确跟随位置与朝向。
+  6. 静止时播放 IdleA。
+  7. 移动时播放 WalkA。
+  8. 停止后恢复 IdleA。
+  9. 阵营色正确。
+  10. 销毁 Unit 后 Renderer Instance 同步销毁。
+  11. 原生模型不会与 AOE Sprite 重复显示。
+  12. 关闭 Gameplay Bridge 后恢复原生路径。
+
+  本阶段不实现：
+
+  - 新的寻路算法。
+  - 新的局部避障算法。
+  - 编组和阵型。
+  - 路径共享。
+  - 战斗和弹道。
+  - 攻击、死亡或采集动画。
+  - gld Gameplay 代码移植。
+
+  所有移动和路径行为必须复用 Recoil 原生实现。
+
+  ## 十二、测试与验收
+
+  完成后执行：
+
+  1. git diff --check
+  2. 编译 spring 目标。
+  3. 使用绝对写入目录启动测试：
+
+  cd D:\code\RecoilEngine\build-test-runtime
+  $runtimeDir = (Get-Location).Path
+  ..\build-mingw\spring.exe --write-dir $runtimeDir blank-map-test.txt
+
+  4. 检查 infolog.txt：
+      - 无 Fatal。
+      - 无崩溃。
+      - 无 Shader/OpenGL 错误。
+      - 无失效 Renderer Handle。
+      - Gameplay Unit 数和 AOE Instance 数一致。
+
+  5. 验证 1、100、1,000 个 Gameplay Unit。
+  6. 条件允许时测试 10,000 Unit，并区分：
+      - Gameplay Simulation CPU。
+      - Bridge 更新 CPU。
+      - Renderer CPU。
+      - GPU 时间。
+      - Draw Call。
+
+  7. 验证反复创建和销毁 Unit。
+  8. 验证地图重载或 Renderer 重载。
+  9. 验证关闭开关后的原生行为。
+  10. 不提交 aoe2de_cache、构建输出、日志或测试缓存。
+
+  ## 执行顺序
+
+  1. 调研并输出 Unit 生命周期和渲染调用链。
+  2. 给出桥接层设计和文件修改清单。
+  3. 明确线程、同步状态和资源生命周期边界。
+  4. 实现 UnitDef 映射缓存。
+  5. 实现 Unit 创建和销毁桥接。
+  6. 实现 Transform、Heading、Team Color 和 Visibility 更新。
+  7. 接入 Idle/Walk 动画映射。
+  8. 处理原生模型隐藏与失败回退。
+  9. 构建并运行最小 Gameplay 场景。
+  10. 完成性能和回归验证。
+
+  ## Git 约束
+
+  - 开始前检查暂存区和未暂存修改。
+  - 保留此前已经验收的 AOE Renderer 基线。
+  - 不覆盖或回滚用户已有修改。
+  - 不暂存 cont/aoe2de_cache 和生成文件。
+  - Gameplay 接入修改保持为独立、可审查的差异。
+  - 未经明确要求不要创建 Commit。
+
+  ## 最终输出
+
+  最终汇报至少包括：
+
+  - Recoil Unit Gameplay 的核心调用链。
+  - 新增桥接层的职责和生命周期。
+  - 修改及新增文件列表。
+  - UnitDef 到 AOE Appearance 的配置方式。
+  - 原生模型隐藏策略。
+  - Idle/Walk 判定规则。
+  - 可见性和同步安全处理。
+  - 构建与运行方法。
+  - 1/100/1,000 Unit 测试结果。
+  - Simulation、Bridge 和 Renderer 性能数据。
+  - Draw Call 变化。
+  - 已知限制和下一阶段建议。
+
+  如果调研发现现有 Renderer API 无法安全承接 Gameplay Unit，请先给出证据并扩展稳定接口；不要让 Renderer 直接依赖
+  CUnit 来绕过桥接层。

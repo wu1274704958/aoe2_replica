@@ -10,6 +10,16 @@
 enum class Aoe2UnitAnimationSlot : std::uint8_t {
 	IdleA,
 	WalkA,
+	AttackA,
+	DeathA,
+};
+
+struct Aoe2UnitAnimationInfo {
+	float durationSeconds = 0.0f;
+	float releaseTimeSeconds = 0.0f;
+	float fps = 0.0f;
+	std::uint32_t frameCount = 0;
+	bool loop = false;
 };
 
 struct Aoe2AppearanceHandle {
@@ -45,6 +55,7 @@ struct Aoe2UnitRenderDiagnostics {
 	std::uint32_t batches = 0;
 	std::uint32_t drawCalls = 0;
 	std::uint64_t uploadedBytes = 0;
+	std::uint64_t textureBytes = 0;
 	double cpuUpdateMs = 0.0;
 	double cpuDrawMs = 0.0;
 	double gpuDrawMs = 0.0;
@@ -63,8 +74,10 @@ public:
 	static void KillStatic();
 	static void UpdateStatic();
 	static void DrawStatic();
+	static bool IsAvailable();
 
 	static Aoe2AppearanceHandle PreloadAppearance(const std::string& unitId);
+	static bool GetAnimationInfo(Aoe2AppearanceHandle appearance, Aoe2UnitAnimationSlot animation, Aoe2UnitAnimationInfo& info);
 	static Aoe2InstanceHandle CreateInstance(const Aoe2UnitInstanceDesc& desc);
 	static bool DestroyInstance(Aoe2InstanceHandle handle);
 	static bool SetTransform(Aoe2InstanceHandle handle, const float3& position, float headingRadians, float scale);

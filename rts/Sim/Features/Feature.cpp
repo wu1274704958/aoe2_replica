@@ -23,12 +23,14 @@
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Sim/Projectiles/ProjectileMemPool.h"
 #include "Sim/Units/UnitDef.h"
+#include "Sim/Units/Unit.h"
 #include "Sim/Units/UnitDefHandler.h"
 #include "Sim/Units/UnitHandler.h"
 #include "System/EventHandler.h"
 #include "System/SpringMath.h"
 #include "System/creg/DefTypes.h"
 #include "System/Log/ILog.h"
+#include "System/StringUtil.h"
 
 #include "System/Misc/TracyDefs.h"
 
@@ -52,6 +54,8 @@ CR_REG_METADATA(CFeature, (
 	CR_MEMBER(lastReclaimFrame),
 	CR_MEMBER(fireTime),
 	CR_MEMBER(smokeTime),
+	CR_MEMBER(aoe2DecayStartFrame),
+	CR_MEMBER(aoe2DecayEndFrame),
 
 	CR_MEMBER(def),
 	CR_MEMBER(udef),
@@ -154,6 +158,10 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const CSolidObject* po = params.parentObj;
+	if (const auto* sourceUnit = dynamic_cast<const CUnit*>(po); sourceUnit != nullptr) {
+		renderSourceUnitId = sourceUnit->id;
+		renderSourceUnitToken = reinterpret_cast<std::uintptr_t>(sourceUnit);
+	}
 
 	def = params.featureDef;
 	udef = params.unitDef;
@@ -171,6 +179,25 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 	health = def->health;
 	maxHealth = def->health;
 	reclaimTime = def->reclaimTime;
+
+	const auto parseFrameParam = [this](const char* name, int defaultValue) {
+		const auto it = def->customParams.find(name);
+		if (it == def->customParams.end())
+			return defaultValue;
+		bool failed = false;
+		const int value = StringToInt(it->second, &failed);
+		return failed ? defaultValue : std::max(0, value);
+	};
+	if (const auto it = def->customParams.find("aoe2_corpse"); it != def->customParams.end()) {
+		const std::string value = StringToLower(it->second);
+		if (value == "1" || value == "true" || value == "yes") {
+			const int deathFrames = parseFrameParam("aoe2_death_frames", GAME_SPEED);
+			const int holdFrames = parseFrameParam("aoe2_corpse_hold_frames", GAME_SPEED * 4);
+			const int fadeFrames = parseFrameParam("aoe2_corpse_fade_frames", GAME_SPEED * 2);
+			aoe2DecayStartFrame = gs->frameNum + deathFrames + holdFrames;
+			aoe2DecayEndFrame = aoe2DecayStartFrame + std::max(1, fadeFrames);
+		}
+	}
 
 	defResources = def->cost;
 	resources = def->cost;
@@ -645,6 +672,11 @@ bool CFeature::Update()
 	continueUpdating |= (smokeTime != 0);
 	continueUpdating |= (fireTime != 0);
 	continueUpdating |= (def->geoThermal);
+	continueUpdating |= (aoe2DecayEndFrame >= 0);
+	if (aoe2DecayEndFrame >= 0 && gs->frameNum >= aoe2DecayEndFrame) {
+		featureHandler.DeleteFeature(this);
+		return true;
+	}
 
 	if (smokeTime != 0) {
 		if (!((gs->frameNum + id) & 3) && projectileHandler.GetParticleSaturation() < 0.7f) {
@@ -737,4 +769,3 @@ int CFeature::ChunkNumber(float f) { return int(math::ceil(f * modInfo.reclaimMe
 // to distinguish unit and feature ID's (values >= MaxUnits() correspond to
 // features in object commands)
 int CFeature::GetBlockingMapID() const { return (id + unitHandler.MaxUnits()); }
-
