@@ -148,5 +148,12 @@ set(sources_engine_Rendering
 		"${CMAKE_CURRENT_SOURCE_DIR}/Fonts/glFont.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Fonts/glFontRenderer.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Fonts/TextWrap.cpp"
-		PARENT_SCOPE
 	)
+
+if (ENABLE_AOE2_UNIT_RENDERER)
+	list(APPEND sources_engine_Rendering
+		"${CMAKE_CURRENT_SOURCE_DIR}/Aoe2/Aoe2UnitRenderer.cpp"
+	)
+endif ()
+
+set(sources_engine_Rendering "${sources_engine_Rendering}" PARENT_SCOPE)

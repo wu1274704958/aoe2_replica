@@ -272,6 +272,11 @@ endif (NO_CREG)
 
 option(NO_SOUND "No sound output support" FALSE)
 
+option(ENABLE_AOE2_UNIT_RENDERER "Build the experimental AOE2 unit renderer" OFF)
+if (ENABLE_AOE2_UNIT_RENDERER)
+	add_definitions(-DENABLE_AOE2_UNIT_RENDERER)
+endif ()
+
 if    (WIN32)
 	## internal AVI recorder (w/o sound atm)
 	option(NO_AVI "Disable in-game video recording" FALSE)

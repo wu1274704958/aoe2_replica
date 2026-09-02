@@ -22,6 +22,9 @@
 #include "Rendering/Features/FeatureDrawer.h"
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Rendering/Units/UnitDrawer.h"
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2UnitRenderer.h"
+#endif
 #include "Rendering/IPathDrawer.h"
 #include "Rendering/DepthBufferCopy.h"
 #include "Rendering/SmoothHeightMeshDrawer.h"
@@ -137,6 +140,9 @@ void CWorldDrawer::InitPost() const
 
 		CProjectileDrawer::InitStatic();
 		CUnitDrawer::InitStatic();
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		CAoe2UnitRenderer::InitStatic();
+#endif
 		// see ::InitPre
 		// CFeatureDrawer::InitStatic();
 	}
@@ -182,6 +188,9 @@ void CWorldDrawer::Kill()
 	spring::SafeDelete(inMapDrawerView);
 
 	CFeatureDrawer::KillStatic(gu->globalReload);
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2UnitRenderer::KillStatic();
+#endif
 	CUnitDrawer::KillStatic(gu->globalReload); // depends on unitHandler, cubeMapHandler
 	CProjectileDrawer::KillStatic(gu->globalReload);
 
@@ -219,6 +228,9 @@ void CWorldDrawer::Update(bool newSimFrame)
 	// unitDrawer->Update();
 	// lineDrawer.UpdateLineStipple();
 	CUnitDrawer::UpdateStatic();
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2UnitRenderer::UpdateStatic();
+#endif
 	CFeatureDrawer::UpdateStatic();
 	projectileDrawer->UpdateDrawFlags();
 
@@ -368,6 +380,13 @@ void CWorldDrawer::DrawOpaqueObjects() const
 		unitDrawer->Draw(false);
 		featureDrawer->Draw(false);
 	}
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	{
+		SCOPED_TIMER("Draw::World::Models::AOE2Units");
+		SCOPED_GL_DEBUGGROUP("Draw::World::Models::AOE2Units");
+		CAoe2UnitRenderer::DrawStatic();
+	}
+#endif
 	{
 		SCOPED_TIMER("Draw::World::Models::Projectiles");
 		SCOPED_GL_DEBUGGROUP("Draw::World::Models::Projectiles");
