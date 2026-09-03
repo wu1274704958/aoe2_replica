@@ -633,6 +633,9 @@ void CUnit::EnableScriptMoveType()
 	if (UsingScriptMoveType())
 		return;
 
+	if (IsAttackMovementLocked())
+		CancelAttackMotion(false);
+
 	prevMoveType = moveType;
 	prevMoveType->Disconnect();
 	moveType = MoveTypeFactory::GetScriptMoveType(this);
@@ -665,6 +668,21 @@ void CUnit::Update()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	ASSERT_SYNCED(pos);
+
+	if (attackMotionPhase == AttackMotionPhase::AttackRelease) {
+		if (!attackMotionFinalRelease) {
+			attackMotionPhase = AttackMotionPhase::AttackWindup;
+		} else if (attackMotionEndFrame > gs->frameNum) {
+			attackMotionPhase = AttackMotionPhase::AttackRecovery;
+		} else {
+			ResetAttackMotionState();
+		}
+	} else if (attackMotionPhase == AttackMotionPhase::AttackRecovery && attackMotionEndFrame <= gs->frameNum) {
+		ResetAttackMotionState();
+	}
+
+	if (GetTransporter() != nullptr && IsAttackMovementLocked())
+		CancelAttackMotion(false);
 
 	UpdatePhysicalState(0.1f);
 	UpdatePosErrorParams(true, false);
@@ -945,6 +963,9 @@ void CUnit::UpdateLosStatus(int at)
 
 void CUnit::SetStunned(bool stun) {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (stun && IsAttackMovementLocked())
+		CancelAttackMotion(false);
+
 	stunned = stun;
 
 	if (moveType->progressState == AMoveType::Active) {
@@ -1389,8 +1410,153 @@ void CUnit::DoDamage(
 
 
 
+bool CUnit::SupportsAttackMoveLock() const
+{
+	return (unitDef != nullptr && unitDef->IsGroundUnit() && !UsingScriptMoveType());
+}
+
+bool CUnit::IsAttackStartSpeedSatisfied() const
+{
+	if (unitDef == nullptr)
+		return true;
+
+	const float threshold = unitDef->attackStartSpeedThreshold;
+	return ((speed.x * speed.x + speed.z * speed.z) <= (threshold * threshold));
+}
+
+bool CUnit::IsAttackMovementLocked() const
+{
+	return (
+		unitDef != nullptr &&
+		unitDef->attackCannotMove &&
+		SupportsAttackMoveLock() &&
+		attackMotionPhase != AttackMotionPhase::Mobile
+	);
+}
+
+bool CUnit::IsAttackAnimationActive() const
+{
+	return (
+		attackMotionPhase == AttackMotionPhase::AttackWindup ||
+		attackMotionPhase == AttackMotionPhase::AttackRelease ||
+		attackMotionPhase == AttackMotionPhase::AttackRecovery
+	);
+}
+
+bool CUnit::IsStoppingForAttack(const CWeapon* weapon) const
+{
+	return (
+		weapon != nullptr &&
+		attackMotionPhase == AttackMotionPhase::StoppingForAttack &&
+		attackMotionWeaponNum == weapon->weaponNum
+	);
+}
+
+bool CUnit::RequestAttackStop(const CWeapon* weapon)
+{
+	if (
+		weapon == nullptr ||
+		weapon->weaponNum != 0 ||
+		unitDef == nullptr ||
+		!unitDef->attackCannotMove ||
+		!SupportsAttackMoveLock()
+	) {
+		return true;
+	}
+
+	if (attackMotionPhase == AttackMotionPhase::Mobile) {
+		attackMotionPhase = AttackMotionPhase::StoppingForAttack;
+		attackMotionWeaponNum = weapon->weaponNum;
+		attackMotionStartFrame = -1;
+		attackMotionReleaseFrame = -1;
+		attackMotionEndFrame = -1;
+		attackMotionHasReleased = false;
+		attackMotionFinalRelease = false;
+		moveType->StopMoving();
+	}
+
+	return IsAttackStartSpeedSatisfied();
+}
+
+void CUnit::BeginAttackMotion(const CWeapon* weapon)
+{
+	if (weapon == nullptr || weapon->weaponNum != 0)
+		return;
+
+	attackMotionPhase = AttackMotionPhase::AttackWindup;
+	attackMotionWeaponNum = weapon->weaponNum;
+	attackMotionStartFrame = gs->frameNum;
+	attackMotionReleaseFrame = -1;
+	attackMotionEndFrame = -1;
+	attackMotionHasReleased = false;
+	attackMotionFinalRelease = false;
+}
+
+void CUnit::NotifyAttackReleased(const CWeapon* weapon, bool finalShot)
+{
+	if (weapon == nullptr || attackMotionWeaponNum != weapon->weaponNum || attackMotionStartFrame < 0)
+		return;
+
+	attackMotionPhase = AttackMotionPhase::AttackRelease;
+	attackMotionReleaseFrame = gs->frameNum;
+	attackMotionHasReleased = true;
+	attackMotionFinalRelease = finalShot;
+	attackMotionEndFrame = finalShot ? (gs->frameNum + weapon->weaponDef->attackRecoveryTime) : -1;
+}
+
+void CUnit::FinishAttackMotion(const CWeapon* weapon)
+{
+	if (weapon == nullptr || attackMotionWeaponNum != weapon->weaponNum)
+		return;
+
+	if (!attackMotionHasReleased) {
+		ResetAttackMotionState();
+		return;
+	}
+
+	attackMotionFinalRelease = true;
+	attackMotionEndFrame = attackMotionReleaseFrame + weapon->weaponDef->attackRecoveryTime;
+	attackMotionPhase = (attackMotionEndFrame > gs->frameNum)
+		? AttackMotionPhase::AttackRecovery
+		: AttackMotionPhase::AttackRelease;
+}
+
+void CUnit::CancelAttackMotion(bool refundReload)
+{
+	if (attackMotionPhase == AttackMotionPhase::Mobile)
+		return;
+
+	const bool refundCommittedReload = (
+		refundReload &&
+		!attackMotionHasReleased &&
+		attackMotionStartFrame >= 0
+	);
+
+	if (attackMotionWeaponNum >= 0 && static_cast<std::size_t>(attackMotionWeaponNum) < weapons.size()) {
+		CWeapon* weapon = weapons[attackMotionWeaponNum];
+		if (weapon != nullptr)
+			weapon->CancelAttackMotion(refundCommittedReload);
+	}
+
+	ResetAttackMotionState();
+}
+
+void CUnit::ResetAttackMotionState()
+{
+	attackMotionPhase = AttackMotionPhase::Mobile;
+	attackMotionStartFrame = -1;
+	attackMotionReleaseFrame = -1;
+	attackMotionEndFrame = -1;
+	attackMotionWeaponNum = -1;
+	attackMotionHasReleased = false;
+	attackMotionFinalRelease = false;
+}
+
 void CUnit::ApplyImpulse(const float3& impulse) {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (impulse.SqLength() > 0.0f && IsAttackMovementLocked())
+		CancelAttackMotion(true);
+
 	if (GetTransporter() != nullptr) {
 		// transfer impulse to unit transporting us, scaled by its mass
 		// assume we came here straight from DoDamage, not LuaSyncedCtrl
@@ -2911,6 +3077,13 @@ CR_REG_METADATA(CUnit, (
 
 	CR_MEMBER(lastAttackFrame),
 	CR_MEMBER(lastFireWeapon),
+	CR_MEMBER(attackMotionPhase),
+	CR_MEMBER(attackMotionStartFrame),
+	CR_MEMBER(attackMotionReleaseFrame),
+	CR_MEMBER(attackMotionEndFrame),
+	CR_MEMBER(attackMotionWeaponNum),
+	CR_MEMBER(attackMotionHasReleased),
+	CR_MEMBER(attackMotionFinalRelease),
 	CR_MEMBER(lastFlareDrop),
 	CR_MEMBER(lastNanoAdd),
 

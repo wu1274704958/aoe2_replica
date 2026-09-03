@@ -700,8 +700,10 @@ void CGroundMoveType::UpdateUnitPosition() {
 
 	if (owner->GetTransporter() != nullptr) return;
 
- 	if (owner->UnderFirstPersonControl())
- 		UpdateDirectControl();
+	if (owner->IsAttackMovementLocked())
+		ChangeSpeed(0.0f, false);
+	else if (owner->UnderFirstPersonControl())
+		UpdateDirectControl();
 
 	UpdateOwnerPos(owner->speed, calcSpeedVectorFuncs[modInfo.allowGroundUnitGravity](owner, this, deltaSpeed, myGravity));
 }
@@ -750,6 +752,11 @@ void CGroundMoveType::UpdateOwnerAccelAndHeading()
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (owner->IsStunned() || owner->beingBuilt) {
 		setHeading = HEADING_CHANGED_STUN;
+		return;
+	}
+
+	if (owner->IsAttackMovementLocked()) {
+		ChangeSpeed(0.0f, false);
 		return;
 	}
 
@@ -898,6 +905,9 @@ void CGroundMoveType::SlowUpdate()
 
 void CGroundMoveType::StartMovingRaw(const float3 moveGoalPos, float moveGoalRadius) {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (owner->IsAttackMovementLocked())
+		return;
+
 	const float deltaRadius = std::max(0.0f, ownerRadius - moveGoalRadius);
 
 	#ifdef PATHING_DEBUG
@@ -944,6 +954,9 @@ void CGroundMoveType::StartMovingRaw(const float3 moveGoalPos, float moveGoalRad
 
 void CGroundMoveType::StartMoving(float3 moveGoalPos, float moveGoalRadius) {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (owner->IsAttackMovementLocked())
+		return;
+
 	// add the footprint radius if moving onto goalPos would cause it to overlap impassable squares
 	// (otherwise repeated coldet push-jittering can ensue if allowTerrainCollision is not disabled)
 	// not needed if goalRadius actually exceeds ownerRadius, e.g. for builders
@@ -2920,6 +2933,14 @@ void CGroundMoveType::HandleUnitCollisions(
 		pushCollider = pushCollider && (!collider->beingBuilt && !collider->UsingScriptMoveType() && !collider->moveType->IsPushResistant());
 		pushCollidee = pushCollidee && (!collidee->beingBuilt && !collidee->UsingScriptMoveType() && !collidee->moveType->IsPushResistant());
 
+		const bool colliderAttackLocked = collider->IsAttackMovementLocked();
+		const bool collideeAttackLocked = collidee->IsAttackMovementLocked();
+		pushCollider &= !colliderAttackLocked;
+		pushCollidee &= !collideeAttackLocked;
+
+		if (colliderAttackLocked && collideeAttackLocked)
+			continue;
+
 		const bool isStatic = (!collideeMobile && !collideeUD->IsAirUnit()) || (!pushCollider && !pushCollidee);
 		if (isCollision && isStatic) {
 			// building (always axis-aligned, possibly has a yardmap)
@@ -3728,4 +3749,3 @@ bool CGroundMoveType::SetMemberValue(unsigned int memberHash, void* memberValue)
 
 	return false;
 }
-

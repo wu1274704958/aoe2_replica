@@ -1,7 +1,6 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef UNITDEF_H
-#define UNITDEF_H
+#pragma once
 
 #include <vector>
 
@@ -186,6 +185,8 @@ public:
 	bool pushResistant;
 	bool strafeToAttack;  /// should the unit move sideways when it can't shoot?
 	bool stopToAttack;
+	bool attackCannotMove;
+	float attackStartSpeedThreshold;
 	float minCollisionSpeed;
 	float slideTolerance;
 	float rollingResistanceCoefficient;
@@ -405,5 +406,3 @@ private:
 	SResourcePack realUpkeep;
 	float realBuildTime;
 };
-
-#endif /* UNITDEF_H */

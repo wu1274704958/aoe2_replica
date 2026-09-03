@@ -56,6 +56,7 @@ CR_REG_METADATA(CWeapon, (
 	CR_MEMBER(nextSalvo),
 	CR_MEMBER(salvoLeft),
 	CR_MEMBER(salvoWindup),
+	CR_MEMBER(attackMotionPreviousReloadStatus),
 	CR_MEMBER(ttl),
 
 	CR_MEMBER(range),
@@ -144,6 +145,7 @@ CWeapon::CWeapon(CUnit* owner, const WeaponDef* def):
 	nextSalvo(0),
 	salvoLeft(0),
 	salvoWindup(0),
+	attackMotionPreviousReloadStatus(0),
 	ttl(1),
 
 	range(1.0f),
@@ -427,6 +429,11 @@ bool CWeapon::CallAimingScript(bool waitForAim)
 
 bool CWeapon::CanFire(bool ignoreAngleGood, bool ignoreTargetType, bool ignoreRequestedDir) const
 {
+	return CanFireImpl(ignoreAngleGood, ignoreTargetType, ignoreRequestedDir, false);
+}
+
+bool CWeapon::CanFireImpl(bool ignoreAngleGood, bool ignoreTargetType, bool ignoreRequestedDir, bool ignoreAttackMotion) const
+{
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (!ignoreAngleGood && !angleGood)
 		return false;
@@ -458,29 +465,54 @@ bool CWeapon::CanFire(bool ignoreAngleGood, bool ignoreTargetType, bool ignoreRe
 	if (fpsPlayer != nullptr && !fpsPlayer->fpsController.mouse1 && !fpsPlayer->fpsController.mouse2)
 		return false;
 
+	if (
+		!ignoreAttackMotion &&
+		weaponNum == 0 &&
+		owner->unitDef->attackCannotMove &&
+		owner->SupportsAttackMoveLock() &&
+		!owner->IsAttackStartSpeedSatisfied()
+	) {
+		return false;
+	}
+
 	return true;
 }
 
 void CWeapon::UpdateFire()
 {
 	ZoneScoped;
-	if (!CanFire(false, false, false))
+	if (!CanFireImpl(false, false, false, true)) {
+		if (owner->IsStoppingForAttack(this))
+			owner->CancelAttackMotion(false);
 		return;
+	}
 
 	if (fastQueryPointUpdate) {
 		UpdateWeaponPieces(false);
 		UpdateWeaponVectors();
 	} 
 
-	if (!TryTarget(currentTargetPos, currentTarget, true))
+	if (!TryTarget(currentTargetPos, currentTarget, true)) {
+		if (owner->IsStoppingForAttack(this))
+			owner->CancelAttackMotion(false);
 		return;
+	}
 
 	// pre-check if we got enough resources (so CobBlockShot gets only called when really possible to shoot)
-	if (!weaponDef->stockpile && !owner->HaveResources(weaponDef->cost))
+	if (!weaponDef->stockpile && !owner->HaveResources(weaponDef->cost)) {
+		if (owner->IsStoppingForAttack(this))
+			owner->CancelAttackMotion(false);
+		return;
+	}
+
+	if (!owner->RequestAttackStop(this))
 		return;
 
-	if (CobBlockShot())
+	if (CobBlockShot()) {
+		if (owner->IsStoppingForAttack(this))
+			owner->CancelAttackMotion(false);
 		return;
+	}
 
 	if (!weaponDef->stockpile) {
 		// use resource for shoot
@@ -490,6 +522,8 @@ void CWeapon::UpdateFire()
 			const int minPeriod = std::max(1, int(reloadTime / owner->reloadSpeed));
 			const float averageFactor = 1.0f / minPeriod;
 			ownerTeam->resPull += weaponDef->cost * averageFactor;
+			if (owner->IsStoppingForAttack(this))
+				owner->CancelAttackMotion(false);
 			return;
 		}
 		ownerTeam->resPull += weaponDef->cost;
@@ -500,6 +534,7 @@ void CWeapon::UpdateFire()
 		eventHandler.StockpileChanged(owner, this, oldCount);
 	}
 
+	attackMotionPreviousReloadStatus = reloadStatus;
 	reloadStatus = gs->frameNum + int(reloadTime / owner->reloadSpeed);
 
 	salvoLeft = salvoSize;
@@ -508,6 +543,7 @@ void CWeapon::UpdateFire()
 
 	owner->lastMuzzleFlameSize = muzzleFlareSize;
 	owner->lastMuzzleFlameDir = wantedDir;
+	owner->BeginAttackMotion(this);
 	owner->script->FireWeapon(weaponNum);
 }
 
@@ -567,6 +603,7 @@ void CWeapon::UpdateSalvo()
 				// Special case needed here if the last shot of the salvo has been cancelled.
 				if (salvoLeft == 0) {
 					owner->script->EndBurst(weaponNum);
+					owner->FinishAttackMotion(this);
 
 					const bool searchForNewTarget = (currentTarget == owner->curTarget);
 					owner->commandAI->WeaponFired(this, searchForNewTarget, false);
@@ -596,6 +633,8 @@ void CWeapon::UpdateSalvo()
 		Fire(false);
 	}
 
+	owner->NotifyAttackReleased(this, salvoLeft == 0);
+
 	// Rock the unit in the direction of fire
 	if (owner->script->HasRockUnit())
 		owner->script->WorldRockUnit((-wantedDir).SafeNormalize2D());
@@ -605,6 +644,20 @@ void CWeapon::UpdateSalvo()
 
 	if (salvoLeft == 0)
 		owner->script->EndBurst(weaponNum);
+}
+
+void CWeapon::CancelAttackMotion(bool refundReload)
+{
+	if (salvoLeft > 0) {
+		salvoLeft = 0;
+		nextSalvo = gs->frameNum;
+		owner->script->EndBurst(weaponNum);
+	}
+
+	if (refundReload)
+		reloadStatus = attackMotionPreviousReloadStatus;
+
+	attackMotionPreviousReloadStatus = reloadStatus;
 }
 
 

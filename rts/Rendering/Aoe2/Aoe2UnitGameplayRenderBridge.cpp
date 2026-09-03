@@ -25,7 +25,6 @@
 #include "Sim/Units/UnitDef.h"
 #include "Sim/Units/UnitDefHandler.h"
 #include "Sim/Units/UnitHandler.h"
-#include "Sim/Weapons/Weapon.h"
 #include "System/Config/ConfigHandler.h"
 #include "System/Config/ConfigVariable.h"
 #include "System/EventClient.h"
@@ -76,7 +75,6 @@ struct UnitSlot {
 	std::uintptr_t unitToken = 0;
 	std::uint32_t activeIndex = INVALID_ACTIVE_INDEX;
 	float animationTime = 0.0f;
-	int lastReloadStatus = 0;
 	int attackStartFrame = -1;
 	std::uint32_t mappingIndex = 0;
 	std::uint8_t playerColor = 0;
@@ -265,6 +263,12 @@ void Aoe2GameplayBridgeImpl::ParseMappings()
 		mapping.animationSpeed = ParseFloatParam(unitDef, "aoe2_animation_speed", 1.0f, 0.05f, 8.0f);
 		mapping.hideNativeModel = ParseBoolParam(unitDef, "aoe2_hide_native_model", true);
 		mapping.configured = true;
+
+		if (unitDef.NumWeapons() > 1) {
+			LOG_L(L_WARNING,
+				"[Aoe2GameplayBridge] UnitDef %s has %u weapons; multi-weapon AOE2 animation is unsupported and only weapon 1 drives AttackA",
+				unitDef.name.c_str(), unitDef.NumWeapons());
+		}
 
 		if (const std::string* color = FindParam(unitDef, "aoe2_player_color"); color != nullptr) {
 			std::string lower = StringToLower(*color);
@@ -623,20 +627,24 @@ void Aoe2GameplayBridgeImpl::UpdateUnit(std::uint32_t unitId, CUnit* unit, float
 	} else if (horizontalSpeed >= moveSpeedThreshold) {
 		slot.walking = true;
 	}
+	const bool gameplayAttacking = unit->IsAttackAnimationActive();
+	const int gameplayAttackStartFrame = unit->GetAttackMotionStartFrame();
+	const bool newAttack = gameplayAttacking && (
+		!slot.attacking ||
+		slot.attackStartFrame != gameplayAttackStartFrame
+	);
+	if (newAttack) {
+		slot.attackStartFrame = gameplayAttackStartFrame;
+		slot.animationTime = 0.0f;
+	}
+	if (!gameplayAttacking && slot.attacking) {
+		slot.attackStartFrame = -1;
+		slot.animationTime = 0.0f;
+	}
+	slot.attacking = gameplayAttacking;
+
 	if (wasWalking != slot.walking && !slot.attacking)
 		slot.animationTime = 0.0f;
-
-	int newestReloadStatus = slot.lastReloadStatus;
-	for (const CWeapon* weapon : unit->weapons) {
-		if (weapon != nullptr)
-			newestReloadStatus = std::max(newestReloadStatus, weapon->reloadStatus);
-	}
-	if (newestReloadStatus > slot.lastReloadStatus) {
-		slot.attacking = true;
-		slot.attackStartFrame = gs->frameNum;
-		slot.animationTime = 0.0f;
-	}
-	slot.lastReloadStatus = newestReloadStatus;
 
 	float playbackRate = mapping.animationSpeed;
 	if (slot.walking && !slot.attacking) {
@@ -650,12 +658,8 @@ void Aoe2GameplayBridgeImpl::UpdateUnit(std::uint32_t unitId, CUnit* unit, float
 				INV_GAME_SPEED * mapping.animationSpeed
 		);
 		Aoe2UnitAnimationInfo attackInfo;
-		if (!CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::AttackA, attackInfo) ||
-			slot.animationTime >= attackInfo.durationSeconds) {
-			slot.attacking = false;
-			slot.attackStartFrame = -1;
-			slot.animationTime = 0.0f;
-		}
+		if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::AttackA, attackInfo))
+			slot.animationTime = std::min(slot.animationTime, attackInfo.durationSeconds);
 	} else {
 		slot.animationTime = std::max(0.0f, slot.animationTime + deltaSeconds * playbackRate);
 	}

@@ -1,7 +1,6 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef _WEAPON_DEF_H
-#define _WEAPON_DEF_H
+#pragma once
 
 #include "Sim/Misc/DamageArray.h"
 #include "Sim/Misc/GuiSoundSet.h"
@@ -83,6 +82,7 @@ public:
 	int salvosize;
 	float salvodelay;
 	int salvoWindup;
+	int attackRecoveryTime = 0;
 	float reload;
 	float beamtime;
 	bool beamburst;
@@ -290,5 +290,3 @@ private:
 	void ParseWeaponSounds(const LuaTable& wdTable);
 	void LoadSound(const LuaTable& wdTable, const std::string& soundKey, GuiSoundSet& soundSet);
 };
-
-#endif // _WEAPON_DEF_H

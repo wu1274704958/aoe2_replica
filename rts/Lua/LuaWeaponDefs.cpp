@@ -499,6 +499,7 @@ static bool InitParamMap()
 	ADD_INT("projectiles",  wd.projectilespershot);
 	ADD_FLOAT("salvoDelay", wd.salvodelay);
 	ADD_FUNCTION("windup", wd.salvoWindup, FramesToSeconds);
+	ADD_FUNCTION("attackRecoveryTime", wd.attackRecoveryTime, FramesToSeconds);
 	ADD_FLOAT("reload",     wd.reload);
 	ADD_FLOAT("beamtime",   wd.beamtime);
 	ADD_BOOL("beamburst",   wd.beamburst);

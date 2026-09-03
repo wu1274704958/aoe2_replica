@@ -48,6 +48,7 @@ static int SoundsTable(lua_State* L, const void* data);
 static int WeaponsTable(lua_State* L, const void* data);
 static int CategorySetFromBits(lua_State* L, const void* data);
 static int CategorySetFromString(lua_State* L, const void* data);
+static int MoveSpeedToElmosPerSecond(lua_State* L, const void* data);
 
 
 /******************************************************************************/
@@ -208,6 +209,13 @@ static int UnitDefNewIndex(lua_State* L)
 	}
 
 	return 0;
+}
+
+static int MoveSpeedToElmosPerSecond(lua_State* L, const void* data)
+{
+	const float speed = *reinterpret_cast<const float*>(data);
+	lua_pushnumber(L, speed * GAME_SPEED);
+	return 1;
 }
 
 
@@ -887,6 +895,8 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_BOOL("levelGround", ud.levelGround);
 	ADD_BOOL("strafeToAttack", ud.strafeToAttack);
 	ADD_BOOL("stopToAttack", ud.stopToAttack);
+	ADD_BOOL("attackCannotMove", ud.attackCannotMove);
+	ADD_FUNCTION("attackStartSpeedThreshold", ud.attackStartSpeedThreshold, MoveSpeedToElmosPerSecond);
 
 	ADD_BOOL( "useBuildingGroundDecal",  ud.decalDef.useGroundDecal);
 	ADD_INT(  "buildingDecalType",       ud.decalDef.groundDecalType);

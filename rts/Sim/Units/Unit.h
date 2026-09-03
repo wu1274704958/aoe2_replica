@@ -1,8 +1,8 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef UNIT_H
-#define UNIT_H
+#pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include "Sim/Objects/SolidObject.h"
@@ -60,6 +60,14 @@ static constexpr uint8_t LOS_ALL_BITS = \
 static constexpr uint8_t LOS_ALL_MASK_BITS = \
 	(LOS_INLOS_MASK | LOS_INRADAR_MASK | LOS_PREVLOS_MASK | LOS_CONTRADAR_MASK);
 
+enum class AttackMotionPhase : std::uint8_t {
+	Mobile,
+	StoppingForAttack,
+	AttackWindup,
+	AttackRelease,
+	AttackRecovery,
+};
+
 
 class CUnit : public CSolidObject
 {
@@ -87,6 +95,24 @@ public:
 
 	void ApplyDamage(CUnit* attacker, const DamageArray& damages, float& baseDamage, float& experienceMod);
 	void ApplyImpulse(const float3& impulse);
+
+	bool RequestAttackStop(const CWeapon* weapon);
+	void BeginAttackMotion(const CWeapon* weapon);
+	void NotifyAttackReleased(const CWeapon* weapon, bool finalShot);
+	void FinishAttackMotion(const CWeapon* weapon);
+	void CancelAttackMotion(bool refundReload);
+
+	bool SupportsAttackMoveLock() const;
+	bool IsAttackStartSpeedSatisfied() const;
+	bool IsAttackMovementLocked() const;
+	bool IsAttackAnimationActive() const;
+	bool IsStoppingForAttack(const CWeapon* weapon) const;
+	void ResetAttackMotionState();
+	AttackMotionPhase GetAttackMotionPhase() const { return attackMotionPhase; }
+	int GetAttackMotionStartFrame() const { return attackMotionStartFrame; }
+	int GetAttackMotionReleaseFrame() const { return attackMotionReleaseFrame; }
+	int GetAttackMotionEndFrame() const { return attackMotionEndFrame; }
+	int GetAttackMotionWeaponNum() const { return attackMotionWeaponNum; }
 
 	bool AttackUnit(CUnit* unit, bool isUserTarget, bool wantManualFire, bool fpsMode = false);
 	bool AttackGround(const float3& pos, bool isUserTarget, bool wantManualFire, bool fpsMode = false);
@@ -364,6 +390,14 @@ public:
 	// last time this unit fired a weapon
 	int lastFireWeapon = 0;
 
+	AttackMotionPhase attackMotionPhase = AttackMotionPhase::Mobile;
+	int attackMotionStartFrame = -1;
+	int attackMotionReleaseFrame = -1;
+	int attackMotionEndFrame = -1;
+	int attackMotionWeaponNum = -1;
+	bool attackMotionHasReleased = false;
+	bool attackMotionFinalRelease = false;
+
 	// if we arent built on for a while start decaying
 	int lastNanoAdd = 0;
 	int lastFlareDrop = 0;
@@ -562,5 +596,3 @@ struct GlobalUnitParams {
 };
 
 extern GlobalUnitParams globalUnitParams;
-
-#endif // UNIT_H

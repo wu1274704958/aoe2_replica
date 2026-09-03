@@ -322,6 +322,10 @@ void CMobileCAI::GiveCommandReal(const Command& c, bool fromSynced)
 	// directly issued queueing commands always cancel temporary (i.e. auto-generated attack) orders
 	const bool directCmd = ((c.GetOpts() & SHIFT_KEY) == 0);
 	const bool queingCmd = (nonQueingCommands.find(c.GetID()) == nonQueingCommands.end());
+	const bool explicitMove = (c.GetID() == CMD_MOVE && directCmd && !c.IsInternalOrder());
+
+	if (explicitMove && owner->IsAttackMovementLocked())
+		owner->CancelAttackMotion(true);
 
 	if (directCmd && queingCmd) {
 		tempOrder = false;

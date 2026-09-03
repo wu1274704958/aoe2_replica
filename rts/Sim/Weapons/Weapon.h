@@ -1,7 +1,6 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef WEAPON_H
-#define WEAPON_H
+#pragma once
 
 #include <functional>
 #include <vector>
@@ -102,6 +101,7 @@ public:
 
 	bool StopAttackingTargetIf(const std::function<bool(const SWeaponTarget&)>& pred);
 	bool StopAttackingAllyTeam(const int ally);
+	void CancelAttackMotion(bool refundReload);
 
 	bool IsFastAutoRetargetingEnabled() const { return fastAutoRetargeting; }
 	void UpdateWeaponErrorVector();
@@ -129,6 +129,7 @@ private:
 	void UpdateFire();
 	bool UpdateStockpile();
 	void UpdateSalvo();
+	bool CanFireImpl(bool ignoreAngleGood, bool ignoreTargetType, bool ignoreRequestedDir, bool ignoreAttackMotion) const;
 
 	void UpdateInterceptTarget();
 	bool AllowWeaponAutoTarget() const;
@@ -163,6 +164,7 @@ public:
 	int nextSalvo;                          // when the next shot in the current salvo will fire
 	int salvoLeft;                          // number of shots left in current salvo
 	int salvoWindup;                        // delay before first shot (in frames)
+	int attackMotionPreviousReloadStatus;   // reload status before the current first-weapon attack cycle
 	int ttl;                                // flight time for most projectile type weapons except for Starburst
 
 	float range;
@@ -228,5 +230,3 @@ protected:
 	// (eg. nuke toward a repulsor, or missile toward a shield)
 	std::vector<int> incomingProjectileIDs;
 };
-
-#endif /* WEAPON_H */

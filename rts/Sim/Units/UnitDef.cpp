@@ -129,6 +129,8 @@ UnitDef::UnitDef()
 	, pushResistant(false)
 	, strafeToAttack(false)
 	, stopToAttack(false)
+	, attackCannotMove(false)
+	, attackStartSpeedThreshold(0.01f)
 	, minCollisionSpeed(0.0f)
 	, slideTolerance(0.0f)
 	, rollingResistanceCoefficient(0.0f)
@@ -692,6 +694,13 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	levelGround = udTable.GetBool("levelGround", true);
 	strafeToAttack = udTable.GetBool("strafeToAttack", false);
 	stopToAttack = udTable.GetBool("stopToAttack", false);
+	attackCannotMove = udTable.GetBool("attackCannotMove", false);
+	attackStartSpeedThreshold = std::max(0.0f, udTable.GetFloat("attackStartSpeedThreshold", 0.3f)) * INV_GAME_SPEED;
+	if (attackCannotMove && !IsGroundUnit()) {
+		LOG_L(L_WARNING,
+			"UnitDef (%s) attackCannotMove is only supported for ground-mobile units and will be ignored",
+			name.c_str());
+	}
 
 
 	// initialize the (per-unitdef) collision-volume
@@ -908,4 +917,3 @@ bool UnitDef::HasBomberWeapon(unsigned int idx) const {
 	assert(HasWeapon(idx));
 	return (weapons[idx].def->IsAircraftWeapon());
 }
-
