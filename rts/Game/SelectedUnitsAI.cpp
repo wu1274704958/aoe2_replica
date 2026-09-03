@@ -146,7 +146,7 @@ bool CSelectedUnitsHandlerAI::GiveCommandNet(Command& c, int playerNum)
 		const bool  groupSpeed = !!(c.GetOpts() & CONTROL_KEY);
 		const bool queuedOrder = !!(c.GetOpts() &   SHIFT_KEY);
 
-		CalculateGroupData(playerNum, queuedOrder);
+		CalculateGroupData(netSelectedUnitIDs, queuedOrder);
 
 		for (const int unitID: netSelectedUnitIDs) {
 			CUnit* unit = unitHandler.GetUnit(unitID);
@@ -173,7 +173,7 @@ bool CSelectedUnitsHandlerAI::GiveCommandNet(Command& c, int playerNum)
 		const bool  groupSpeed = !!(c.GetOpts() & CONTROL_KEY);
 		const bool queuedOrder = !!(c.GetOpts() &   SHIFT_KEY);
 
-		CalculateGroupData(playerNum, queuedOrder);
+		CalculateGroupData(netSelectedUnitIDs, queuedOrder);
 
 		for (const int unitID: netSelectedUnitIDs) {
 			CUnit* unit = unitHandler.GetUnit(unitID);
@@ -212,7 +212,7 @@ bool CSelectedUnitsHandlerAI::GiveCommandNet(Command& c, int playerNum)
 		const bool  groupSpeed =  !(c.GetOpts() &   ALT_KEY); // one '!'
 		const bool queuedOrder = !!(c.GetOpts() & SHIFT_KEY);
 
-		CalculateGroupData(playerNum, queuedOrder);
+		CalculateGroupData(netSelectedUnitIDs, queuedOrder);
 
 		for (const int unitID: netSelectedUnitIDs) {
 			CUnit* unit = unitHandler.GetUnit(unitID);
@@ -271,10 +271,59 @@ bool CSelectedUnitsHandlerAI::GiveCommandNet(Command& c, int playerNum)
 }
 
 
+bool CSelectedUnitsHandlerAI::GiveGroupLockedCommand(const Command& c, const std::vector<int>& unitIDs)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	if (unitIDs.empty())
+		return false;
+
+	switch (c.GetID()) {
+		case CMD_MOVE:
+		case CMD_PATROL:
+		case CMD_FIGHT: {
+			break;
+		}
+		default: {
+			return false;
+		}
+	}
+
+	if (c.GetNumParams() < 3)
+		return false;
+
+	const bool queuedOrder = !!(c.GetOpts() & SHIFT_KEY);
+	CalculateGroupData(unitIDs, queuedOrder);
+
+	bool orderedAny = false;
+
+	for (const int unitID: unitIDs) {
+		CUnit* unit = unitHandler.GetUnit(unitID);
+
+		if (unit == nullptr)
+			continue;
+
+		Command unitCommand = c;
+		const float3 midPos = (queuedOrder ? LastQueuePosition(unit) : float3(unit->midPos));
+		const float3 difPos = midPos - groupCenterCoor;
+
+		unitCommand.SetParam(CMDPARAM_MOVE_X, unitCommand.GetParam(CMDPARAM_MOVE_X) + difPos.x);
+		unitCommand.SetParam(CMDPARAM_MOVE_Y, unitCommand.GetParam(CMDPARAM_MOVE_Y) + difPos.y);
+		unitCommand.SetParam(CMDPARAM_MOVE_Z, unitCommand.GetParam(CMDPARAM_MOVE_Z) + difPos.z);
+
+		SetUnitWantedMaxSpeedNet(unit);
+		unit->commandAI->GiveCommand(unitCommand, -1, true, true);
+		orderedAny = true;
+	}
+
+	return orderedAny;
+}
+
+
 //
 // Calculate the outer limits and the center of the group coordinates.
 //
-void CSelectedUnitsHandlerAI::CalculateGroupData(int playerNum, bool queueing) {
+void CSelectedUnitsHandlerAI::CalculateGroupData(const std::vector<int>& playerUnitIDs, bool queueing) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	float3 sumCoor;
 	float3 minCoor =  OnesVector * 100000.0f;
@@ -285,8 +334,6 @@ void CSelectedUnitsHandlerAI::CalculateGroupData(int playerNum, bool queueing) {
 
 	groupSumLength = 0.0f;
 	groupMinMaxSpeed = 1e9f;
-
-	const std::vector<int>& playerUnitIDs = selectedUnitsHandler.netSelected[playerNum];
 
 	// find highest, lowest and weighted central positional coordinates among selected units
 	for (const int unitID: playerUnitIDs) {

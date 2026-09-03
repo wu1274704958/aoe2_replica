@@ -15,9 +15,10 @@ class CUnit;
 class CSelectedUnitsHandlerAI {
 public:
 	bool GiveCommandNet(Command& c, int playerNum);
+	bool GiveGroupLockedCommand(const Command& c, const std::vector<int>& unitIDs);
 
 private:
-	void CalculateGroupData(int playerNum, bool queueing);
+	void CalculateGroupData(const std::vector<int>& unitIDs, bool queueing);
 	void MakeFormationFrontOrder(Command* c, int playerNum);
 	void CreateUnitOrder(std::vector< std::pair<float, int> >& out, int playerNum);
 

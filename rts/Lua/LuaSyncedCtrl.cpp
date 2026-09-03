@@ -18,6 +18,7 @@
 #include "Game/GameSetup.h"
 #include "Game/Camera.h"
 #include "Game/GameHelper.h"
+#include "Game/SelectedUnitsAI.h"
 #include "Game/SelectedUnitsHandler.h"
 #include "Game/Players/PlayerHandler.h"
 #include "Game/Players/Player.h"
@@ -322,6 +323,7 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GiveOrderToUnit);
 	REGISTER_LUA_CFUNC(GiveOrderToUnitMap);
 	REGISTER_LUA_CFUNC(GiveOrderToUnitArray);
+	REGISTER_LUA_CFUNC(GiveOrderToUnitArrayGroup);
 	REGISTER_LUA_CFUNC(GiveOrderArrayToUnit);
 	REGISTER_LUA_CFUNC(GiveOrderArrayToUnitMap);
 	REGISTER_LUA_CFUNC(GiveOrderArrayToUnitArray);
@@ -6020,6 +6022,47 @@ int LuaSyncedCtrl::GiveOrderToUnitArray(lua_State* L)
 	inGiveOrder--;
 
 	lua_pushnumber(L, count);
+	return 1;
+}
+
+
+/***
+ * @function Spring.GiveOrderToUnitArrayGroup
+ * @param unitIDs integer[] An array of unit IDs forming one temporary command group.
+ * @param cmdID CMD|integer The command ID. Supports CMD.MOVE, CMD.PATROL, and CMD.FIGHT.
+ * @param params CreateCommandParams? Parameters for the given command.
+ * @param options CreateCommandOptions?
+ * @return boolean orderGiven
+ *
+ * Issues a native group-locked command. Members retain their relative offsets
+ * from the group's current center instead of converging on one destination.
+ */
+int LuaSyncedCtrl::GiveOrderToUnitArrayGroup(lua_State* L)
+{
+	std::vector<CUnit*> units;
+	ParseUnitArray(L, __func__, 1, units);
+
+	if (units.empty()) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	Command cmd = LuaUtils::ParseCommand(L, __func__, 2);
+
+	if (inGiveOrder >= MAX_CMD_RECURSION_DEPTH)
+		luaL_error(L, "[%s] recursion not permitted, max depth: %d", __func__, MAX_CMD_RECURSION_DEPTH);
+
+	std::vector<int> unitIDs;
+	unitIDs.reserve(units.size());
+
+	for (const CUnit* unit: units)
+		unitIDs.push_back(unit->id);
+
+	inGiveOrder++;
+	const bool orderedAny = selectedUnitsAI.GiveGroupLockedCommand(cmd, unitIDs);
+	inGiveOrder--;
+
+	lua_pushboolean(L, orderedAny);
 	return 1;
 }
 
