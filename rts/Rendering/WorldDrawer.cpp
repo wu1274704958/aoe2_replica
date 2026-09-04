@@ -23,6 +23,7 @@
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Rendering/Units/UnitDrawer.h"
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2ProjectileGameplayRenderBridge.h"
 #include "Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.h"
 #include "Rendering/Aoe2/Aoe2UnitRenderer.h"
 #endif
@@ -144,6 +145,7 @@ void CWorldDrawer::InitPost() const
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
 		CAoe2UnitRenderer::InitStatic();
 		CAoe2UnitGameplayRenderBridge::InitStatic();
+		CAoe2ProjectileGameplayRenderBridge::InitStatic();
 #endif
 		// see ::InitPre
 		// CFeatureDrawer::InitStatic();
@@ -191,6 +193,7 @@ void CWorldDrawer::Kill()
 
 	CFeatureDrawer::KillStatic(gu->globalReload);
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
+	CAoe2ProjectileGameplayRenderBridge::KillStatic();
 	CAoe2UnitGameplayRenderBridge::KillStatic();
 	CAoe2UnitRenderer::KillStatic();
 #endif
@@ -237,6 +240,7 @@ void CWorldDrawer::Update(bool newSimFrame)
 	CFeatureDrawer::UpdateStatic();
 #if defined(ENABLE_AOE2_UNIT_RENDERER)
 	CAoe2UnitGameplayRenderBridge::UpdateStatic();
+	CAoe2ProjectileGameplayRenderBridge::UpdateStatic();
 	CAoe2UnitRenderer::UpdateStatic();
 #endif
 	projectileDrawer->UpdateDrawFlags();

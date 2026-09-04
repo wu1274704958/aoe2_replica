@@ -77,6 +77,8 @@ public:
 	static bool IsAvailable();
 
 	static Aoe2AppearanceHandle PreloadAppearance(const std::string& unitId);
+	// Loads an exported graphics cache entry into the shared sprite batches.
+	static Aoe2AppearanceHandle PreloadGraphicsAppearance(const std::string& graphicsId);
 	static bool GetAnimationInfo(Aoe2AppearanceHandle appearance, Aoe2UnitAnimationSlot animation, Aoe2UnitAnimationInfo& info);
 	static Aoe2InstanceHandle CreateInstance(const Aoe2UnitInstanceDesc& desc);
 	static bool DestroyInstance(Aoe2InstanceHandle handle);

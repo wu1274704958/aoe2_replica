@@ -80,6 +80,10 @@ return {
 			gravityAffected = true,
 			turret = true,
 			damage = { default = 5 },
+			customParams = {
+				aoe2_projectile_id = "p_arrow",
+				aoe2_projectile_scale = "1.0",
+			},
 		},
 	},
 	ArmorDefs = {},

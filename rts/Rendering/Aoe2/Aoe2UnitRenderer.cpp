@@ -396,6 +396,22 @@ GLuint LoadTexture(const std::filesystem::path& path, bool linear, TextureEncodi
 	return texture;
 }
 
+GLuint CreateZeroMaskTexture(std::uint64_t& textureBytes)
+{
+	constexpr std::uint8_t zero = 0;
+	GLuint texture = 0;
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 1, 1, 0, GL_RED, GL_UNSIGNED_BYTE, &zero);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	textureBytes = 1;
+	return texture;
+}
+
 void DeleteLayerTexture(Layer& layer)
 {
 	if (layer.texture != 0)
@@ -420,6 +436,7 @@ public:
 	void Draw();
 
 	Aoe2AppearanceHandle Preload(const std::string& unitId);
+	Aoe2AppearanceHandle PreloadGraphics(const std::string& graphicsId);
 	Aoe2InstanceHandle Create(const Aoe2UnitInstanceDesc& desc);
 	bool Destroy(Aoe2InstanceHandle handle);
 	Instance* Get(Aoe2InstanceHandle handle);
@@ -429,7 +446,7 @@ public:
 	void SetupBatch(GpuBatch& batch);
 	void UploadBatch(GpuBatch& batch);
 	void DrawBatch(const Animation& animation, GpuBatch& batch, bool shadow);
-	Animation LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName);
+	Animation LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName, bool requirePlayerColor = true);
 	Shader::IProgramObject* CreateShader(const char* name, std::string_view fragmentShader);
 	int DirectionForHeading(float heading, int directionCount) const;
 	void PollGpuQueries();
@@ -552,7 +569,7 @@ void Aoe2RendererImpl::Kill()
 	shadowShader = nullptr;
 }
 
-Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName)
+Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName, bool requirePlayerColor)
 {
 	simdjson::dom::parser parser;
 	simdjson::dom::element document;
@@ -584,26 +601,35 @@ Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPat
 	animation.main = ParseLayer(mainLayer, configPath, animation.directionCount, animation.framesPerDirection);
 	animation.shadow = ParseLayer(shadowLayer, configPath, animation.directionCount, animation.framesPerDirection);
 	animation.playerColor = ParseLayer(playerColorLayer, configPath, animation.directionCount, animation.framesPerDirection);
-	if (!animation.main.usable || !animation.playerColor.usable)
-		throw std::runtime_error("main or player-color layer is unavailable");
-	if (animation.playerColor.atlasWidth != animation.main.atlasWidth ||
-		animation.playerColor.atlasHeight != animation.main.atlasHeight ||
-		animation.playerColor.frames.size() != animation.main.frames.size())
-		throw std::runtime_error("player-color atlas layout differs from main");
-	for (std::size_t i = 0; i < animation.main.frames.size(); ++i) {
-		const auto& mainFrame = animation.main.frames[i];
-		const auto& playerFrame = animation.playerColor.frames[i];
-		if (mainFrame.uv.x != playerFrame.uv.x || mainFrame.uv.y != playerFrame.uv.y ||
-			mainFrame.uv.z != playerFrame.uv.z || mainFrame.uv.w != playerFrame.uv.w ||
-			mainFrame.footX != playerFrame.footX || mainFrame.footY != playerFrame.footY)
-			throw std::runtime_error("player-color frame layout differs from main");
+	if (!animation.main.usable)
+		throw std::runtime_error("main layer is unavailable");
+	if (requirePlayerColor) {
+		if (!animation.playerColor.usable)
+			throw std::runtime_error("player-color layer is unavailable");
+		if (animation.playerColor.atlasWidth != animation.main.atlasWidth ||
+			animation.playerColor.atlasHeight != animation.main.atlasHeight ||
+			animation.playerColor.frames.size() != animation.main.frames.size())
+			throw std::runtime_error("player-color atlas layout differs from main");
+		for (std::size_t i = 0; i < animation.main.frames.size(); ++i) {
+			const auto& mainFrame = animation.main.frames[i];
+			const auto& playerFrame = animation.playerColor.frames[i];
+			if (mainFrame.uv.x != playerFrame.uv.x || mainFrame.uv.y != playerFrame.uv.y ||
+				mainFrame.uv.z != playerFrame.uv.z || mainFrame.uv.w != playerFrame.uv.w ||
+				mainFrame.footX != playerFrame.footX || mainFrame.footY != playerFrame.footY)
+				throw std::runtime_error("player-color frame layout differs from main");
+		}
 	}
 	ResolveMissingFrames(animation.main, animation.directionCount, animation.framesPerDirection);
 	ResolveMissingFrames(animation.shadow, animation.directionCount, animation.framesPerDirection);
-	ResolveMissingFrames(animation.playerColor, animation.directionCount, animation.framesPerDirection);
+	if (requirePlayerColor)
+		ResolveMissingFrames(animation.playerColor, animation.directionCount, animation.framesPerDirection);
 	animation.main.texture = LoadTexture(animation.main.imagePath, true, TextureEncoding::Rgba, animation.main.textureBytes);
-	animation.playerColor.texture = LoadTexture(
-		animation.playerColor.imagePath, false, TextureEncoding::PlayerColorR8, animation.playerColor.textureBytes);
+	if (requirePlayerColor) {
+		animation.playerColor.texture = LoadTexture(
+			animation.playerColor.imagePath, false, TextureEncoding::PlayerColorR8, animation.playerColor.textureBytes);
+	} else {
+		animation.playerColor.texture = CreateZeroMaskTexture(animation.playerColor.textureBytes);
+	}
 	if (animation.shadow.usable)
 		animation.shadow.texture = LoadTexture(
 			animation.shadow.imagePath, true, TextureEncoding::ShadowR8, animation.shadow.textureBytes);
@@ -613,7 +639,7 @@ Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPat
 Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 {
 	for (std::size_t i = 0; i < appearances.size(); ++i) {
-		if (appearances[i] != nullptr && appearances[i]->id == unitId)
+		if (appearances[i] != nullptr && appearances[i]->id == "units/" + unitId)
 			return {static_cast<std::uint32_t>(i), appearances[i]->generation};
 	}
 
@@ -632,7 +658,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 		if (const auto error = document["animations"].get_object().get(manifestAnimations); error != simdjson::SUCCESS)
 			throw std::runtime_error("manifest animations are missing or invalid: " + std::string(simdjson::error_message(error)));
 		appearance = std::make_unique<Appearance>();
-		appearance->id = unitId;
+		appearance->id = "units/" + unitId;
 		std::int64_t attackReleaseFrame = 0;
 		if (document["dat"]["combat"]["frame_delay"].get_int64().get(attackReleaseFrame) == simdjson::SUCCESS)
 			appearance->attackReleaseFrame = static_cast<int>(std::max<std::int64_t>(0, attackReleaseFrame));
@@ -667,6 +693,63 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			}
 		}
 		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload unit %s: %s", unitId.c_str(), error.what());
+		return {};
+	}
+}
+
+Aoe2AppearanceHandle Aoe2RendererImpl::PreloadGraphics(const std::string& graphicsId)
+{
+	const std::string cacheId = "graphics/" + graphicsId;
+	for (std::size_t i = 0; i < appearances.size(); ++i) {
+		if (appearances[i] != nullptr && appearances[i]->id == cacheId)
+			return {static_cast<std::uint32_t>(i), appearances[i]->generation};
+	}
+
+	std::unique_ptr<Appearance> appearance;
+	try {
+		const auto manifestPath = cacheRoot / "graphics" / graphicsId / "manifest.json";
+		simdjson::dom::parser parser;
+		simdjson::dom::element document;
+		if (const auto error = parser.load(manifestPath.string()).get(document); error != simdjson::SUCCESS)
+			throw std::runtime_error("failed to parse graphics manifest: " + std::string(simdjson::error_message(error)));
+		if (document["schema_version"].get_int64().value() != 2 ||
+			GetString(document["kind"]) != "aoe2de_graphics" || GetString(document["id"]) != graphicsId)
+			throw std::runtime_error("unsupported graphics manifest");
+
+		simdjson::dom::array discoveredAnimations;
+		if (const auto error = document["discovered_animations"].get_array().get(discoveredAnimations); error != simdjson::SUCCESS || discoveredAnimations.size() == 0)
+			throw std::runtime_error("graphics manifest has no discovered animation");
+		std::string animationName;
+		for (const auto animationElement : discoveredAnimations) {
+			animationName = GetString(animationElement);
+			break;
+		}
+		simdjson::dom::object animations;
+		if (const auto error = document["animations"].get_object().get(animations); error != simdjson::SUCCESS)
+			throw std::runtime_error("graphics manifest animations are missing or invalid: " + std::string(simdjson::error_message(error)));
+		simdjson::dom::object entry;
+		if (const auto error = animations[animationName].get_object().get(entry); error != simdjson::SUCCESS || GetString(entry["status"]) != "exported")
+			throw std::runtime_error("graphics animation is unavailable");
+
+		appearance = std::make_unique<Appearance>();
+		appearance->id = cacheId;
+		appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = LoadAnimation(
+			manifestPath.parent_path() / GetString(entry["config"]), animationName, false);
+		appearance->loaded[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = true;
+		const auto& animation = appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)];
+		diagnostics.textureBytes += animation.main.textureBytes + animation.shadow.textureBytes + animation.playerColor.textureBytes;
+		const auto index = static_cast<std::uint32_t>(appearances.size());
+		appearances.push_back(std::move(appearance));
+		return {index, appearances.back()->generation};
+	} catch (const std::exception& error) {
+		if (appearance != nullptr) {
+			for (auto& animation : appearance->animations) {
+				DeleteLayerTexture(animation.main);
+				DeleteLayerTexture(animation.shadow);
+				DeleteLayerTexture(animation.playerColor);
+			}
+		}
+		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload graphics %s: %s", graphicsId.c_str(), error.what());
 		return {};
 	}
 }
@@ -1200,6 +1283,11 @@ bool CAoe2UnitRenderer::IsAvailable()
 Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadAppearance(const std::string& unitId)
 {
 	return (renderer != nullptr) ? renderer->Preload(unitId) : Aoe2AppearanceHandle{};
+}
+
+Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadGraphicsAppearance(const std::string& graphicsId)
+{
+	return (renderer != nullptr) ? renderer->PreloadGraphics(graphicsId) : Aoe2AppearanceHandle{};
 }
 
 bool CAoe2UnitRenderer::GetAnimationInfo(

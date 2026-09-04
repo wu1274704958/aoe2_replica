@@ -6,6 +6,10 @@
 #include <tuple>
 #include <bit>
 
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+#include "Rendering/Aoe2/Aoe2ProjectileGameplayRenderBridge.h"
+#endif
+
 #include "Game/Camera.h"
 #include "Game/CameraHandler.h"
 #include "Game/GlobalUnsynced.h"
@@ -587,6 +591,13 @@ bool CProjectileDrawer::ShouldDrawProjectile(const CProjectile* p, uint8_t thisP
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	assert(p);
+
+	// The optional AOE bridge only replaces mapped projectile visuals. Gameplay,
+	// projectile lifetime, and all native rendering remain untouched when off.
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (CAoe2ProjectileGameplayRenderBridge::ReplacesNativeProjectile(p))
+		return false;
+#endif
 
 	if (p->drawFlag == 0)
 		return false;
@@ -1236,4 +1247,3 @@ void CProjectileDrawer::RenderProjectileDestroyed(const CProjectile* p)
 	if (p->model != nullptr)
 		modelRenderers[MDL_TYPE(p)].DelObject(p);
 }
-
