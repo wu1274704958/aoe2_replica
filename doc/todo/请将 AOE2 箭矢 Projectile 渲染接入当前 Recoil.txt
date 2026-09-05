@@ -1,0 +1,103 @@
+请将 AOE2 箭矢 Projectile 渲染接入当前 RecoilEngine 的 AOE Gameplay 测试场景，并优先复用 Recoil 原生 Projectile
+  Gameplay。
+
+  资源来源：
+
+  - E:\code\gld\res\aoe2de_cache\graphics\p_arrow
+  - 该资源预计为 AOE2 风格的多方向 Sprite 动画，需先确认其方向数、帧组织、帧率、锚点、缩放与透明通道规则。
+  - 参考 E:\code\gld 中已有的 AOE Projectile / Sprite 渲染实现，尤其关注资源解析、方向选择、动画采样、实例批处理与坐
+    标转换。
+
+  - AOE 缓存资源仅用于本地开发验证，不重新分发。
+
+  目标：
+
+  - 当 aoe_archer 使用 Recoil 原生 aoe_arrow WeaponDef 发射投射物时，显示 AOE 风格的箭矢 Sprite。
+  - Projectile 的生成、目标选择、弹道、命中、伤害、拦截、生命周期与销毁必须继续由 Recoil 原生 Gameplay 负责。
+  - AOE 渲染层只消费稳定的 Projectile 实例数据，不得接管 Weapon、ProjectileHandler 或伤害逻辑。
+  - 同屏大量箭矢时保持批处理与实例化渲染，禁止逐 Projectile Draw Call。
+
+  实施步骤：
+
+  1. 调研并输出接入方案
+      - 梳理 gld 中 AOE Projectile 渲染完整调用链。
+      - 明确 p_arrow 的资源格式、方向数量、动画帧数、循环规则、地面锚点和朝向约定。
+      - 调研 Recoil 原生 Projectile 的创建、更新、绘制、可见性、销毁与 WeaponDef 关联链路。
+      - 确认 aoe_arrow 实际创建的 Recoil Projectile 类型，以及可用于渲染适配的数据：位置、速度、方向、生命周期、
+        owner、weaponDef、team/allyTeam、可见性状态等。
+
+      - 标注关键源码文件、类型、函数及行号。
+      - 明确坐标系、单位比例、朝向轴、矩阵布局和动画时间单位的转换规则。
+
+  2. 确定最小侵入的渲染架构
+
+     优先采用独立的 AOE Projectile Render Bridge / Renderer：
+      - 建立 WeaponDef 或自定义参数到 AOE Projectile Appearance 的映射，例如：
+
+        customParams = {
+          aoe2_projectile_id = "p_arrow",
+        }
+
+      - 原生 Projectile 创建后，渲染桥按映射创建 AOE Projectile Render Instance。
+      - 每帧仅同步渲染所需数据：
+          - 世界位置；
+          - 速度或飞行方向；
+          - Sprite 朝向与多方向动画帧；
+          - 飞行时间 / 生命周期；
+          - 缩放；
+          - 可见性；
+          - 可选的阵营色信息。
+
+      - 原生 Projectile 销毁、命中或失效时，及时销毁对应渲染实例。
+      - 不创建第二套 Projectile Gameplay 对象，不在 Lua 中模拟弹道，不复制 Recoil 的命中检测。
+
+  3. 评估是否需要独立实例化渲染器
+
+     先判断现有 CAoe2UnitRenderer 是否能安全复用：
+      - 如果 Unit 与 Projectile 的 Sprite 数据格式、批次键、动画方向选择、深度策略和生命周期足够兼容，可抽取共享
+        Sprite Batch 基础设施。
+
+      - 如果 Projectile 的朝向、数量峰值、更新频率或深度行为明显不同，应新增轻量级 Aoe2ProjectileRenderer，但复用底
+        层纹理、Shader、实例缓冲、Sprite 解析和批处理代码。
+
+      - 不要为了快速接入复制整套 Unit Renderer。
+      - 最终说明选择复用、抽取共享层或新增 Renderer 的依据。
+      - 如果没有不明确的地方，就直接实现，有的话先输出实现方案到todo/
+
+  4. 方向、动画与视觉规则
+      - 根据 Projectile 水平速度选择正确的 Sprite 朝向；速度接近零时保持上一有效方向。
+      - 明确是否需要俯仰角表现；若资源只有平面方向帧，应采用稳定的水平朝向投影规则。
+      - 按资源实际帧率推进动画，保证不同帧率下表现稳定。
+      - 处理模型锚点、箭矢中心、尾部和飞行方向的对齐，避免箭头反向、侧向或漂移。
+      - 保持深度测试、混合与地形遮挡策略与 AOE Unit Sprite 一致；如箭矢需要不同的深度偏移，应集中配置，不使用零散魔
+        法常量。
+
+  5. 性能要求
+      - 以资源/材质/纹理/动画布局为批次键进行 Instanced Rendering。
+      - 每帧避免逐 Projectile 动态分配、字符串查找和 GL 资源创建。
+      - 使用预分配实例缓冲、脏标记或环形缓冲。
+      - 静态 Sprite 资源在所有箭矢间共享。
+      - 视锥外 Projectile 不提交渲染；必要时增加距离裁剪。
+      - 输出并评估 100、1,000、10,000 个活跃 Projectile 时的实例数、Draw Call、CPU 帧耗时、GPU 帧耗时与显存开销。
+
+  6. 测试场景与验证
+      - 复用当前 AOE 双队弓手测试场景。
+      - 让 aoe_archer 继续使用 Recoil 原生 Weapon / Projectile 系统发射箭矢。
+      - 验证：
+          - Projectile 出生位置正确；
+          - 飞行方向正确；
+          - 多方向 Sprite 与动画帧正确；
+          - 飞行轨迹与原生弹道一致；
+          - 命中、销毁和伤害仍由原生 Gameplay 驱动；
+          - Projectile 与 Unit、地形、尸体的深度关系正常；
+          - 大量齐射时无明显闪烁、实例泄漏、重复销毁或逐 Projectile Draw Call。
+
+      - 保留原生 Projectile 渲染路径作为可关闭回退；AOE Projectile 渲染必须可通过配置开关独立启用。
+
+  工程约束：
+
+  - 遵循 AGENTS.md、现有代码风格和构建规则。
+  - 不修改与本任务无关的寻路、Unit Group、attackCannotMove、伤害、尸体或 AOE Unit Renderer 逻辑。
+  - 不提交 aoe2de_cache 原始资源、构建目录、日志、缓存或用户配置。
+  - 每个实现阶段均进行编译验证；完成后提供运行方法、配置开关、关键源码位置、性能数据和已知限制。
+  - 若发现 p_arrow 无法直接复用，先给出阻碍证据和薄适配方案，不要直接重写 Projectile 系统。

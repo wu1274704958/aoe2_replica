@@ -1,0 +1,80 @@
+• 请先以弓手 u_arc_archer 为样本，手工配置 AOE 锚点数据并完成原生 Recoil 弹道与受击点验证；暂不实现 manifest 转换工具。待坐标转换、发射点和受击点算法经过验证后，再将确定的规则整理为项目文档。
+
+  目标：
+
+  - 验证 AOE DAT 局部坐标到 Recoil Unit 局部坐标的转换是否正确。
+  - 验证远程 Projectile 从弓手视觉合理的发射位置生成。
+  - 验证 Projectile 对目标 Unit 的瞄准/落点位于躯干受击点，而非脚底或占位模型中心。
+  - 确保同一算法对所有朝向成立，而非仅某个固定方向看起来正确。
+  - 保持 Recoil 原生 Weapon、Cannon Projectile、碰撞、伤害和抛物线逻辑；只修正锚点数据接入。
+
+  实施要求：
+
+  1. 临时手工配置弓手锚点
+    - 以当前干净的工作区为基线
+
+  - 为 aoe_archer 手工定义并接入：
+      - aim_local：目标受击点的 Unit 局部坐标；
+      - weapon1_muzzle_local：箭矢发射点的 Unit 局部坐标；
+      - weapon1_forward_local：武器默认前向；
+      - DAT→Recoil 的坐标轴映射、正负号、比例及朝向零点校正。
+
+  - 不要继续依赖 fir_tree_smallest.s3o 的 QueryWeapon、AimFromWeapon 或其 model piece 计算发射点。
+  - 手工配置必须集中放在明确的测试专用配置处，附带原始 DAT 值、转换后值和注释；不得在 C++ 中散落魔法常量。
+
+  2. 原生锚点接入
+
+  - 在 Recoil Gameplay 层提供最小、稳定的 AOE 锚点接入路径。
+  - Unit 创建时初始化本地 aimPos，使其随 Unit 朝向自动更新。
+  - Weapon 更新时使用手工配置的本地 muzzle/aim anchor 生成：
+      - aimFromPos；
+      - weaponMuzzlePos；
+      - 默认武器前向。
+
+  - 必须通过 Unit 的实际 frontdir/rightdir/updir 完成局部到世界转换，避免按 sprite 的 16 个方向离散查表。
+  - 不得每帧使用 Lua 修改 Unit aimPos，也不得以 Lua 操作占位模型 piece 作为正式方案。
+
+  3. 弹道与受击点验证场景
+
+  为测试场景增加可控诊断模式：
+
+  - 创建一名蓝方弓手与一名红方静止弓手。
+  - 禁用随机散布、目标移动误差和其他会影响观察的随机因素。
+  - 分别将攻击者固定在至少四个朝向：前、右、后、左；建议再补充若干非 90 度朝向。
+  - 每个朝向下执行一次原生攻击。
+  - 在可选 debug 绘制中显示：
+      - 攻击者脚点；
+      - Weapon muzzle 世界坐标；
+      - 攻击者 aim-from 世界坐标；
+      - 目标脚点；
+      - 目标 aimPos；
+      - Projectile 初始位置、飞行轨迹和实际命中位置；
+      - 单位朝向/局部坐标轴。
+
+  - 日志输出原始 DAT 偏移、转换后的局部坐标和关键世界坐标；避免逐帧刷日志。
+
+  4. 验收标准
+
+  - 箭矢不再从占位树模型的位置或单位脚底发射。
+  - 各朝向下，箭矢均从弓手合理的前上方发射。
+  - 各朝向下，Projectile 目标点稳定位于红方 Unit 的躯干受击点。
+  - 目标转向后，受击点仍随其局部坐标正确旋转。
+  - 视觉箭矢 sprite 与原生 projectile drawPos 对齐合理。
+  - 不引入每单位每帧 Lua 逻辑、逐方向物理查表或额外寻路/碰撞成本。
+  - 保持 AOE Renderer、Projectile Renderer 和原生 Weapon/Projectile 的职责边界。
+
+  5. 文档沉淀
+
+  验证通过后，在 D:\code\RecoilEngine\doc\ 新增一份设计文档，一份数据转换文档，至少包含：
+
+  - AOE manifest 中 foot、collision_size、weapon_offset、frame_delay 的实际语义；
+  - DAT→Recoil 的坐标映射、单位比例、正负号和朝向约定；
+  - aim_local、muzzle_local、forward_local 的定义与生命周期；
+  - Recoil 中 Unit aimPos、Weapon muzzle、Projectile 起点、目标点和碰撞体的调用链；
+  - 四朝向及非正交朝向的验证方法和结果；
+  - 当前 manifest 缺少逐方向/逐帧武器 socket 的限制；
+  - 面向未来近战单位的 contact_local / 人工 anchor override 设计；
+  - 后续 manifest→Recoil Def 转换工具的输入、输出、校验规则与实施边界。
+    - 数据转换规则要和设计分开两个md
+
+  在完成调研、配置和验证前，不实现批量转换工具；先以弓手验证结果作为转换规则的依据。

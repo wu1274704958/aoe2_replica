@@ -91,6 +91,43 @@ pwsh -File .\tools\windows-engine-build.ps1 -Incremental
   "$PWD\build-test-runtime\_script.txt"
 ```
 
+`_script.txt` 默认设置 `aoe_fixed_test_camera=1`，双队 Gameplay 测试因此会与锚点校准
+场景共用 5° 长焦相机、45° 俯角和基于参考画面范围换算的相机高度。将该选项
+设为 `0` 可恢复引擎默认相机。启用时还会按相机高度和地图尺寸为
+`FeatureDrawDistance`、`FeatureFadeDistance` 设置仅当前运行有效的内存覆盖，确保
+AOE 尸体 Feature 的 `DeathA` 和程序化 `Decay` 在长焦视角下可见；该覆盖不会写入
+`springsettings.cfg`。
+
 若提示缺少 `SDL2.dll`、`OpenAL32.dll` 等文件，应检查
 `build-official-release/extract` 是否包含官方 Release 的运行时 DLL。构建脚本只替换
 `spring-dev.exe`，不会覆盖或重新分发这些第三方运行时文件。
+
+### 运行 AOE 锚点校准场景
+
+远程单位锚点校准使用独立启动脚本，不应通过运行后自动生成的 `_script.txt` 启用：
+
+```powershell
+.\build-official-release\extract\spring-dev.exe `
+  --write-dir "$PWD\build-test-runtime" `
+  "$PWD\build-test-runtime\aoe-anchor-calibration-test.txt"
+```
+
+该场景固定生成 16 个方向的 `aoe_archer`，详细操作和导出边界参见
+`doc/aoe_anchor_calibration.md`。
+
+### 运行 attackCannotMove 专项回归
+
+```powershell
+.\build-official-release\extract\spring-dev.exe `
+  --write-dir "$PWD\build-test-runtime" `
+  "$PWD\build-test-runtime\aoe-attack-regression-test.txt"
+```
+
+该启动脚本使用 8v1 快速交战场景，并启用 `aoe_explicit_move_regression`。日志中的
+`[AOE Attack Regression]` 会分别报告 Windup/Recovery 显式 Move 取消、目标死亡后的
+Fight 队列保留结果；`[AOE Move Diagnostic] post-elimination` 用于确认恢复行进并在实际
+到达后正常清空命令队列。`[AOE Position Diagnostic] collision-lock audit` 的
+`displacementViolations` 应保持为 0。
+
+`aoe_attack_cannot_move=0` 可用于普通单位兼容性对照，此时测试弓手沿用 Recoil 原生的
+移动与开火时序，不应进入攻击碰撞保护路径。该选项仅修改本地测试 UnitDef。

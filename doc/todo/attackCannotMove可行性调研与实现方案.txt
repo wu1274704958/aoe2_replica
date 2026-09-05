@@ -1,0 +1,483 @@
+# RecoilEngine `attackCannotMove` 可行性调研与实现方案
+
+调研日期：2026-09-03
+
+调研基线：`aoe_dev`，提交 `3f98bac560`（Integrate AOE2 rendering with native gameplay）
+
+范围：只读源码调研与方案设计。本报告不包含引擎实现改动。
+
+## 1. 结论
+
+可行，但仅增加一个 UnitDef 布尔字段、或仅在 `CWeapon::CanFire` 中检查速度，都不能完整实现需求。
+
+严格语义需要四个同步 Gameplay 子系统协作：
+
+1. UnitDef 声明“该单位攻击时不可移动”以及开火速度阈值；
+2. CWeapon 在真正提交一次 burst 前请求停车，速度达标后才进入 windup、刷新 reloadStatus；
+3. CUnit 保存统一的攻击阶段与时间戳，作为 CommandAI、Weapon、MoveType 和渲染桥的单一事实来源；
+4. GroundMoveType 在锁定期间拒绝主动移动，并在 Unit-Unit 碰撞处理中将该单位视为单向不可推动对象。
+
+推荐采用组合方案，而不是把完整状态放在 CMobileCAI 中。原因是武器可通过自动索敌、手动攻击、地面攻击、守卫反击等入口开火，部分武器甚至不依赖当前的移动 CommandAI；只改 CMobileCAI 会漏掉这些入口。
+
+`attackCannotMove = false` 时所有新增判断必须走立即返回的冷路径，保持现有行为。
+
+## 2. 当前行为与问题根因
+
+### 2.1 `stopToAttack` 只控制是否继续追击
+
+- `UnitDef::stopToAttack` 位于 `rts/Sim/Units/UnitDef.h:188`；默认值和解析分别位于 `UnitDef.cpp:131`、`UnitDef.cpp:694`。
+- Lua UnitDefs 暴露位于 `rts/Lua/LuaUnitDefs.cpp:889`。
+- `CMobileCAI::ExecuteFight` 在 `MobileCAI.cpp:489` 搜索敌人，并将临时 `CMD_ATTACK` 压到 `CMD_FIGHT` 前面。
+- `CMobileCAI::ExecuteAttack`、`ExecuteObjectAttack` 分别位于 `MobileCAI.cpp:886`、`:705`。
+- 在 `ExecuteObjectAttack` 的 `MobileCAI.cpp:761`，`stopToAttack` 只禁止“继续追击正在移动的目标”；随后调用 `StopMove()` 和 `CUnit::AttackUnit()`。
+
+所以 `stopToAttack` 的实际含义更接近“获得射击解后停止追击”，不是“速度归零后才能攻击”，也不是“攻击动作完成前锁住位置”。
+
+### 2.2 `StopMove()` 是软停止
+
+- `AMoveType::StopMoving` 默认参数是 `hardStop = false`，见 `rts/Sim/MoveTypes/MoveType.h:29`。
+- `CMobileCAI::StopMove` 位于 `MobileCAI.cpp:1033`。
+- `CGroundMoveType::StopMoving` 位于 `GroundMoveType.cpp:1018`，最终进入 `StopEngine`（`:2438`）。
+- `StopEngine(false, false)` 删除路径并把 wantedSpeed 设为 0，但保留当前速度；单位继续按 decRate 减速。
+- 实际减速发生在 `CGroundMoveType::ChangeSpeed`（`:1280`）。
+
+因此 StopMove 被调用后仍会有数帧滑行。当前测试弓手 `speed = 90`（约 3 elmos/frame）、`maxDec = 0.30`，从满速降至接近零大约需要 10 个模拟帧。
+
+### 2.3 Weapon 不检查移动速度
+
+- 每个 Unit 的每帧顺序为 MoveType 更新、SlowUpdate/CommandAI、Unit 更新、Weapon 更新，见 `rts/Sim/Units/UnitHandler.cpp:442`。
+- 地面移动五阶段更新入口位于 `rts/Sim/MoveTypes/Systems/GroundMoveSystem.cpp:32`。
+- `CWeapon::Update` 位于 `Weapon.cpp:318`，依次调用 UpdateAim、UpdateFire、UpdateSalvo。
+- `CWeapon::CanFire` 位于 `Weapon.cpp:428`，检查瞄准、目标、reload、stockpile、水下和 FPS 输入，但不检查 owner 速度。
+- `CWeapon::UpdateFire` 位于 `Weapon.cpp:464`。一旦通过检查，它立即：
+  - 设置 `reloadStatus`；
+  - 设置 `salvoLeft`；
+  - 将 `nextSalvo` 设置为当前帧加 `salvoWindup`；
+  - 调用 Unit Script 的 FireWeapon。
+- 真正创建 Projectile 在 `CWeapon::UpdateSalvo`（`Weapon.cpp:541`）发生；`windup` 只是延迟首次 salvo。
+
+这解释了为什么单位仍在减速时 Gameplay 已经进入攻击流程。
+
+### 2.4 `CMD.FIGHT` 可以在 AttackA 尚未结束时恢复移动
+
+- `CCommandAI::FinishCommand` 位于 `CommandAI.cpp:1660`，弹出当前命令后会立即 SlowUpdate 下一条命令。
+- `CCommandAI::WeaponFired` 位于 `CommandAI.cpp:1743`；某些攻击类型在 salvo 后可以结束命令。
+- 目标死亡或丢失时，`CMobileCAI::ExecuteAttack` 会执行 `StopMoveAndFinishCommand`，原 `CMD_FIGHT` 随即恢复。
+- Gameplay 中没有“通用攻击后摇”状态；reloadTime 只表达 burst 间隔，不能等价为动画后摇。
+
+因此目标死亡、丢失或攻击命令完成后，Fight 可以重新启动路径，而渲染层仍在播放上一轮 AttackA。
+
+### 2.5 当前 AOE Bridge 在渲染侧推断攻击状态
+
+- AOE Bridge 自己维护 `UnitSlot::attacking` 和 `attackStartFrame`，见 `rts/Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.cpp:74`。
+- `UpdateUnit` 位于同文件 `:614`。
+- 它遍历 Unit 的武器，检测 `reloadStatus` 是否增长（`:632`），然后在渲染侧启动 AttackA。
+- AttackA 按资源动画完整时长播放，结束前始终高于 WalkA/IdleA（`:646` 至 `:675`）。
+- 资源的动画时长和 releaseTime 来自 `Aoe2UnitRenderer.cpp:1205`；releaseTime 在 `:1224` 由 manifest 的 frame_delay 计算。
+
+`reloadStatus` 本身也不是可靠的“攻击开始事件”：CUnit 在 stunned 状态下会逐帧增加每个武器的 reloadStatus，以暂停装填倒计时，见 `rts/Sim/Units/Unit.cpp:664` 附近。Bridge 只观察数值增长，理论上会把这种变化误判为新攻击。此外，动态修改 reload 时间时，新一轮 reloadStatus 也不必然适合作为稳定的动画序列编号。
+
+当前弓手 AttackA 为 30 帧/30 FPS，总长 1 秒，release frame 为 15，即 0.5 秒。测试 WeaponDef 的 windup 也是 0.5 秒，所以释放时刻恰好一致；但 Gameplay 不知道剩余 0.5 秒后摇，允许它提前恢复移动。
+
+### 2.6 停止单位仍可能被推动
+
+- UnitDef 已有静态 `pushResistant`，字段和解析位于 `UnitDef.h:186`、`UnitDef.cpp:437`。
+- GroundMoveType 在构造时复制该值，见 `GroundMoveType.cpp:497`。
+- Unit-Unit 碰撞处理位于 `GroundMoveType.cpp:2781`，推动向量位于 `:2957`。
+- 碰撞产生的 `resultantForces` 最终在 `GroundMoveType.cpp:719` 应用到 owner 位置。
+- pushResistant 单位从运动变为停止时会 Block 并通知 pathManager 地形变化，见 `GroundMoveType.cpp:3565` 后的 `UpdateOwnerSpeed`。
+
+不能直接把现有 pushResistant 当作严格保证：
+
+- 它还带有“停止后成为阻挡图对象”的路径语义；大量弓手频繁攻击会触发大量 Block/UnBlock 和路径失效。
+- 当碰撞双方都不可推动时，现有代码会走静态碰撞退让逻辑以避免死锁，注释明确说明可能仍推动双方；这与“攻击单位绝不被其他 Unit 推开”的严格语义不完全一致。
+- 碰撞推动是位置修正，不一定同步反映为 `CUnit::speed.w`，所以只检查速度也无法发现这种位移。
+
+## 3. 推荐配置语义
+
+### 3.1 UnitDef 必需参数
+
+建议新增：
+
+```lua
+attackCannotMove = false,
+attackStartSpeedThreshold = 0.3,
+```
+
+推荐定义：
+
+- `attackCannotMove`
+  - 类型：bool；默认 false。
+  - true 表示从“为一次可执行攻击停车”开始，直到该攻击 recovery 完成，禁止主动平移和 Unit-Unit 碰撞推动。
+  - true 隐含比 `stopToAttack` 更强的规则，不要求内容同时设置 stopToAttack。
+- `attackStartSpeedThreshold`
+  - 类型：float；推荐对内容作者使用 elmos/second，与现代 UnitDef `speed` 一致。
+  - 内部解析后乘 `INV_GAME_SPEED`，比较水平速度平方，避免每帧 sqrt。
+  - 推荐默认 0.3 elmos/second，对应内部 0.01 elmos/frame，和 GroundMoveType 当前“停止”阈值一致。
+  - 如果配置写成 0.01 elmos/second，内部阈值约为 0.00033 elmos/frame，会比当前移动系统的停止判定严格很多，不建议作为默认值。
+
+命名上可以保留用户提出的 `attackCannotMove`。虽然是负向布尔，但它与现有 `stopToAttack` 有明确层级差异，且默认 false 能保证兼容性。
+
+### 3.2 还需要一个攻击后摇时长来源
+
+仅有上述两个 UnitDef 参数无法定义“何时允许恢复移动”。reloadTime 不能代替 recovery：它从第一发开始计时，通常长于动作动画，而且 burst 可能跨越 reloadTime。
+
+推荐在 WeaponDef 增加：
+
+```lua
+attackRecoveryTime = 0.0,
+```
+
+- 单位：秒；默认 0，保持旧内容行为。
+- 从最后一发 Projectile 实际释放后开始计时。
+- 完整锁定长度约为：`windup + (burst - 1) * burstRate + attackRecoveryTime`。
+- AOE 弓手建议配置 `windup = 0.5`、`attackRecoveryTime = 0.5`，正好覆盖 1 秒 AttackA。
+
+如果项目坚持“只能加 UnitDef 字段”，可以增加 UnitDef `attackMoveLockTime`，但它会把所有武器强制成同一动作长度，多武器单位语义较差，不是推荐方案。
+
+## 4. 推荐同步状态机
+
+在 CUnit 中维护聚合状态：
+
+```text
+Mobile
+  -> StoppingForAttack
+  -> AttackWindup
+  -> AttackRelease
+  -> AttackRecovery
+  -> Mobile
+```
+
+| 状态 | 进入条件 | 平移 | 原地转向 | Unit 推动 | 发射 | 退出条件 |
+|---|---|---:|---:|---:|---:|---|
+| Mobile | 无严格攻击周期 | 允许 | 允许 | 正常 | 否 | 武器具备提交攻击条件 |
+| StoppingForAttack | 武器目标、瞄准、reload 等基本条件成立 | 只允许自身正常减速 | 允许 | 禁止 | 禁止 | 水平速度降到阈值，或攻击候选失效 |
+| AttackWindup | 速度达标并提交 burst | 禁止 | 允许瞄准所需转向 | 禁止 | 未到 release 前禁止 | 到达首次 salvo release |
+| AttackRelease | `UpdateSalvo` 实际释放 Projectile 的帧 | 禁止 | 允许 | 禁止 | 允许 | 单帧转入 Recovery，burst 未结束时可返回 Windup/Release 子循环 |
+| AttackRecovery | 最后一发已释放 | 禁止 | 允许 | 禁止 | 新攻击可延长锁，但不允许移动 | `attackRecoveryTime` 到期且没有其他武器持锁 |
+
+规则：
+
+- AimWeapon 可以在 StoppingForAttack 中运行；Attack 动作从真正提交 windup 开始，而不是从第一次 AimWeapon 开始。AimWeapon 可反复调用或异步完成，不适合作为动作开始边界。
+- 减速前不得设置 reloadStatus、salvoLeft、nextSalvo，也不得调用 FireWeapon。
+- 目标在 StoppingForAttack 中失效：如果没有其他武器请求停车，立即回 Mobile。
+- 目标在 Windup/Release/Recovery 中死亡：已提交动作不因目标死亡提前解锁；现有 salvo 是否继续射向最后位置沿用 Weapon 语义。
+- 昏迷、死亡、进入运输、切换 ScriptMoveType 应作为强中断，清理攻击锁；不得留下永久不可移动状态。
+- 用户下达 Move/Fight 时，命令可以保留在队列中，但 MoveType 在锁定结束前不得产生平移；解锁后由下一次正常 CommandAI 更新恢复，不需要伪造新命令。
+- STOP 不需要打断已开始的 recovery；是否允许显式玩家 Move 取消攻击可作为后续独立规则，首版建议不允许取消，保证严格语义。
+
+## 5. 推荐状态存放位置
+
+### 5.1 CUnit：单一事实来源
+
+建议在 `CUnit` 增加紧凑的同步状态，例如：
+
+```cpp
+enum class AttackMotionPhase : std::uint8_t {
+	Mobile,
+	Stopping,
+	Windup,
+	Release,
+	Recovery,
+};
+
+struct AttackMotionState {
+	int startFrame = -1;
+	int releaseFrame = -1;
+	int endFrame = -1;
+	std::uint16_t weaponNum = 0;
+	AttackMotionPhase phase = AttackMotionPhase::Mobile;
+	std::uint8_t flags = 0;
+};
+```
+
+16 字节即可保存渲染和 Gameplay 需要的核心状态。新增字段必须加入 `CUnit` CREG 元数据；当前注册入口在 `rts/Sim/Units/Unit.cpp:2892`。
+
+CUnit 应提供只读查询：
+
+- `IsAttackMovementLocked()`
+- `IsStoppingForAttack()`
+- `GetAttackMotionPhase()`
+- `GetAttackStartFrame()`
+- `GetAttackReleaseFrame()`
+- `GetAttackEndFrame()`
+- `GetAttackAnimationWeaponNum()`
+
+以及仅供 Weapon/MoveType 使用的状态转换方法，禁止渲染层修改状态。
+
+### 5.2 CWeapon：攻击周期提交者
+
+CWeapon 最清楚一次 burst 的实际开始、windup、每发 release 和最终 release，应该负责向 CUnit报告事件，但不拥有 Unit 的整体移动状态。
+
+推荐重构 `UpdateFire`：
+
+1. 检查原有目标、瞄准、reload、资源等条件；
+2. 对 strict Unit 调用 `owner->RequestStopForAttack(this)`；
+3. 速度未达标时返回，不修改 reloadStatus/salvo 状态；
+4. 速度达标后运行 BlockShot；
+5. 真正提交 burst 时调用 `owner->BeginAttackCycle(this)`，再设置 reloadStatus、salvoLeft 和 nextSalvo；
+6. `UpdateSalvo` 每次实际 Fire 时通知 release，最后一发时进入 recovery。
+
+不建议让 `CanFire()` 直接修改状态，因为它是 const 查询，且 Lua 的 `GetUnitWeaponCanFire` 也会调用它。可以拆成：
+
+- 纯查询 `EvaluateFireReadiness(ignoreAttackMotion)`；
+- `CanFire` 加入纯速度/锁状态判断；
+- `UpdateFire` 在基本 readiness 成立后执行有副作用的停车请求。
+
+### 5.3 多武器聚合
+
+- 任一普通攻击武器准备提交 burst，都可请求 Stopping。
+- Unit 的移动锁是所有 pending/active strict weapon 周期的并集。
+- 新 burst 可以把 `endFrame` 延长到更晚时间。
+- Renderer 默认只把一个武器作为 AttackA 驱动者，建议选择最先提交的最低 weaponNum；其他副武器只延长锁，不反复重启动画。
+- 多个短 reload 自动武器可能让单位长期保持锁定，这是内容配置的自然结果，应在文档中明确。
+- Shield 不参与。Interceptor、手动武器是否参与应由武器类别明确；首版建议仅普通可攻击武器参与，拦截器另行验证。
+
+## 6. MoveType 与 CommandAI 的职责
+
+### 6.1 CommandAI
+
+CommandAI 负责尽早请求 StopMove，提升响应性，但不能成为唯一保障：
+
+- `ExecuteObjectAttack` 在 strict Unit 获得射击解后无条件 StopMove；
+- Ground attack、手动攻击采用同一规则；
+- `CMD.FIGHT` 临时攻击结束后可以恢复命令队列，但实际 StartMoving 必须被 Unit 锁挡住；
+- 无需为了 recovery 保留已死亡 target 或陈旧 CMD_ATTACK，避免 Command Queue 状态复杂化。
+
+### 6.2 MoveType
+
+需要在实际移动入口增加最终门控：
+
+- GroundMoveType 的 StartMoving/StartMovingRaw 在 `IsAttackMovementLocked()` 时不得启动新路径；
+- Direct/FPS control 在锁定期间强制 wantedSpeed 为 0；
+- Stopping 状态仍使用正常 decRate，不使用 hard stop；
+- 达到阈值后仍允许 KeepPointingTo/ChangeHeading，实现原地转向瞄准。
+
+只在 CMobileCAI 拦截不够，因为其他系统和 Lua 可以直接驱动 MoveType。对于 Lua MoveCtrl/脚本强制位置，首版建议定义为外部强制控制：进入 ScriptMoveType 或运输时取消 strict attack cycle，而不是与 Lua 抢位置。
+
+## 7. “攻击时不可被其他 Unit 推动”的实现
+
+### 7.1 不推荐直接动态切换现有 pushResistant
+
+原因：
+
+- pushResistant 同时包含碰撞权重和 GroundBlockingMap/路径障碍语义；
+- 每次攻击都 Block/UnBlock 会造成 pathManager TerrainChange 和潜在批量重寻路；
+- 双方都 pushResistant 时现有防死锁分支仍可能移动双方，不能提供绝对承诺。
+
+### 7.2 推荐增加“仅 Unit 碰撞不可推动”查询
+
+在 CUnit 或 AMoveType 增加只读查询，例如：
+
+```cpp
+bool IsUnitCollisionPushImmune() const;
+```
+
+返回 `unitDef->pushResistant || IsAttackMovementLocked()` 不能直接替代现有逻辑；应在 `CGroundMoveType::HandleUnitCollisions` 中显式区分：
+
+- locked collider：不向它累加 `forceFromMovingCollidees`；
+- locked collidee：把它视为不可移动对象，让未锁定 collider 自己退让；
+- 双方都 locked：保留碰撞事件，但不移动任意一方，直到至少一方解锁；
+- 不把临时攻击锁注册为 GroundBlockingMap 的结构障碍，不触发 TerrainChange。
+
+在 `HandleObjectCollisions` 合并并应用 resultantForces 前再做一次防御性检查，确保 Unit-Unit force 不会泄漏到 locked owner。静态地形/Feature 的合法位置修正仍应允许，以免单位卡进不可通行地形。
+
+### 7.3 明确不属于 Unit 推动的位移
+
+严格规则只承诺禁止主动平移、局部避障平移和 Unit-Unit push。以下是更高优先级的外部状态，建议允许并中断攻击：
+
+- 爆炸 impulse 导致的 skid/fly；入口见 `CGroundMoveType::CanApplyImpulse`（`GroundMoveType.cpp:1454`）与 `CUnit::ApplyImpulse`（`Unit.cpp:1392`）；
+- Lua SetUnitPosition/MoveCtrl；
+- 运输、传送、地图边界修正；
+- 地形高度和水线的 Y 轴修正；
+- 死亡、击飞和坠落。
+
+禁止这些强制位移会改变伤害物理或与 Lua 控制冲突，不应由 attackCannotMove 隐式完成。
+
+## 8. Gameplay 与 AOE Render Bridge 的边界
+
+Gameplay 不直接 include、调用或感知 AOE Renderer。
+
+Bridge 每帧只读 CUnit 的 AttackMotionState：
+
+- Mobile：按真实水平速度选择 IdleA/WalkA；
+- Stopping：继续按真实速度选择 WalkA，降至阈值后可显示 IdleA，但不得提前显示 AttackA；
+- Windup/Release/Recovery：播放 AttackA；
+- 返回 Mobile：根据真实速度选择 IdleA 或 WalkA。
+
+AttackA 时间使用：
+
+```text
+(renderFrame + interpolationOffset - attackStartFrame) / GAME_SPEED
+```
+
+Projectile 的真实 release frame 来自 CWeapon::UpdateSalvo，Gameplay 同步字段只记录事实。Bridge 可以用 releaseFrame 做诊断或对齐，但不能反向影响 Projectile。
+
+资源 AttackA 的 releaseTime 和 Gameplay windup 应由内容配置对齐。建议在 AOE Bridge 初始化时做一次只读校验：
+
+```text
+abs(animation.releaseTime - WeaponDef.windup) <= 1 / GAME_SPEED
+abs(animation.duration - (windup + burstSpan + recovery)) <= 1 / GAME_SPEED
+```
+
+不一致时输出一次 warning，不逐 Unit 输出。Gameplay 锁比动画长时，Renderer 可保持 AttackA 末帧；动画更长时按 Gameplay end 切回状态。首版不建议自动拉伸动画速度，否则 release 帧可能漂移。
+
+采用该方式后，Bridge 可删除当前每 Unit 遍历全部武器、比较 reloadStatus 的推断逻辑，改为 O(1) 读取同步状态。
+
+## 9. 方案比较
+
+| 方案 | 优点 | 缺陷 | 结论 |
+|---|---|---|---|
+| 仅在 `CWeapon::CanFire` 检查速度 | 改动小；覆盖多数开火入口 | 不会主动停车；没有 recovery；不能防推；没有统一渲染状态 | 不完整，只可作为最终开火保险 |
+| 仅在 CMobileCAI 增加状态 | 易控制 Fight/Attack 命令 | 漏掉武器自动索敌、空中/非 Mobile CAI、脚本和多武器；SlowUpdate 粒度较粗 | 不推荐作为核心 |
+| 仅在 CUnit/MoveType 增加锁 | 移动和碰撞约束集中 | 不知道 windup、salvo 和实际 release | 必需但不能单独完成 |
+| CommandAI + CWeapon + CUnit + MoveType 组合 | 覆盖入口完整；时序事实统一；Renderer 解耦；可 O(1) 防推 | 涉及文件较多，需要严谨状态清理 | 推荐 |
+| Lua BlockShot/MoveCtrl | 原型快，不改引擎 | 数万 Unit 的 Lua 调用成本高；状态易分裂；MoveCtrl 会绕过原生移动 | 仅适合验证，不作为最终方案 |
+
+## 10. 特殊 Unit 与边界策略
+
+- 固定炮台/建筑：速度天然为零；可以直接进入 Windup，碰撞锁无额外意义。
+- 普通 Ground Unit、Mobile Builder：首版完整支持；BuilderCAI 继承 Mobile 攻击路径，但仍需实测。
+- Hover air/gunship：只有能稳定悬停的类型才可能支持，需为 HoverAirMoveType 实现等价锁。
+- Strafe aircraft/fighter/bomber：飞行模型要求持续运动，首版应忽略参数并输出一次定义警告，或明确禁止配置。
+- 运输中的可开火单位：无法通过 transportee 的锁停止 transporter；建议运输期间不进入 strict cycle。
+- ScriptMoveType：脚本拥有位置权；建议进入时取消 strict cycle，不尝试覆盖 Lua。
+- Melee、beam、连续武器：需要按实际 Fire/beam 生命周期定义 release/recovery；不能直接套单发 Projectile 假设。
+- 多武器：聚合锁取所有有效周期的并集；动画驱动武器需确定稳定优先级。
+- 目标死亡/失去 LOS：Stopping 可取消；已经提交的动作完成 recovery 后再移动。
+- stunned：建议取消动作并释放锁；如果设计为冻结动作，必须像 reloadStatus 一样逐帧延后 endFrame，否则眩晕期间会悄悄结束 recovery。
+
+## 11. 同步、存档与兼容性
+
+- 所有阶段和时间均使用 `gs->frameNum`，不得使用墙钟时间。
+- 速度判断使用 `speed.x * speed.x + speed.z * speed.z <= thresholdSquared`，不需要 sqrt。
+- CUnit/CWeapon 新增运行时字段必须加入 CREG，否则存档恢复后可能永久锁住或错误播放动画。
+- 新 UnitDef/WeaponDef 默认值必须复现旧行为；false 分支不改变 stopToAttack、reload、Command Queue 和碰撞。
+- UnitDef 新字段应在 LuaUnitDefs 中只读暴露，便于测试和内容诊断。
+- 新引擎规则会改变同步模拟结果；不同引擎版本之间不能混用 demo/联机客户端，这是正常的版本边界。
+- 如果将方案用于上游 PR，必须遵循项目 AI_POLICY：披露 AI 辅助范围、关联已接受 issue，并由人工完整验证与编辑报告/代码。
+
+## 12. 性能评估
+
+目标：20,000 及以上 Unit。
+
+- UnitDef 增加 bool + float：按定义存储，开销可忽略。
+- 推荐 CUnit AttackMotionState：16 bytes/Unit；20,000 Unit 约 312.5 KiB。
+- 如 CWeapon 增加 pending/active 标志及 recovery frame，预计 4 至 8 bytes/Weapon；20,000 个单武器 Unit 约 78 至 156 KiB。
+- Weapon readiness 和状态转换嵌入现有 Weapon Update，时间复杂度仍为 O(total weapons)。
+- MoveType 主动移动门控为 O(1)/Unit。
+- 碰撞免推判断嵌入已有碰撞 pair，仍为 O(existing collision pairs)，每个 pair 只增加常数个布尔判断。
+- 不新增全局邻居搜索、Lua 每帧回调或动态分配。
+- 避免临时 Block/UnBlock 和 TerrainChange 是大规模性能的关键，否则攻击波次会触发路径缓存失效和重寻路峰值。
+- AOE Bridge 从 O(visible units × weapons per unit) 的 reloadStatus 扫描变为 O(visible units) 状态读取，渲染准备成本略有下降。
+
+## 13. 建议修改位置
+
+### 定义与 Lua 暴露
+
+- `rts/Sim/Units/UnitDef.h`：新增 UnitDef 字段。
+- `rts/Sim/Units/UnitDef.cpp`：默认值、解析、合法性检查；可在这里拒绝 strafe aircraft 配置。
+- `rts/Lua/LuaUnitDefs.cpp`：暴露只读参数。
+- `rts/Sim/Weapons/WeaponDef.h/.cpp`：新增 attackRecoveryTime（推荐）。
+
+### 同步状态
+
+- `rts/Sim/Units/Unit.h/.cpp`：AttackMotionState、状态转换和 CREG。
+- `rts/Sim/Weapons/Weapon.cpp`：UpdateFire 速度门控、BeginAttackCycle；UpdateSalvo release/recovery 通知。
+
+### 移动与碰撞
+
+- `rts/Sim/MoveTypes/MoveType.h`：通用锁查询/契约。
+- `rts/Sim/MoveTypes/GroundMoveType.cpp/.h`：StartMoving 门控、正常减速、Unit 碰撞单向不可推动。
+- `rts/Sim/Units/CommandAI/MobileCAI.cpp`：提前 StopMove，但不保存权威攻击阶段。
+- 后续支持空中单位时再修改 HoverAirMoveType/AirCAI。
+
+### 渲染
+
+- `rts/Rendering/Aoe2/Aoe2UnitGameplayRenderBridge.cpp`：删除 reloadStatus 推断，读取 CUnit 状态。
+- `rts/Rendering/Aoe2/Aoe2UnitRenderer.cpp`：仅保留资源动画信息；不写 Gameplay 状态。
+
+## 14. 分阶段实施建议
+
+### P0：单武器 Ground Unit 最小闭环
+
+1. 新增 UnitDef bool/threshold 和 WeaponDef recovery；
+2. 新增 CUnit 状态及 CREG；
+3. CWeapon 在速度达标前不提交 burst；
+4. GroundMoveType 拒绝锁定期 StartMoving；
+5. 碰撞处理禁止其他 Unit 推动 locked Unit；
+6. AOE Bridge 改读 CUnit 状态；
+7. 用当前单武器弓手验证完整时序。
+
+### P1：多武器和中断
+
+1. 多武器锁合并与动画驱动武器优先级；
+2. target death、stun、transport、manual fire、ground attack；
+3. burst、BlockShot、连续武器超时与死锁保护；
+4. 存档加载和 LuaRules reload 验证。
+
+### P2：特殊 MoveType
+
+1. Hover air/gunship；
+2. 评估 strafe aircraft 是否显式不支持；
+3. ScriptMoveType 与运输 fire-platform 的规则。
+
+## 15. 测试矩阵
+
+### 正确性
+
+- 移动中获得目标：先 Walk/减速，低于阈值后才 AttackA、reloadStatus 变化和 windup。
+- release 对齐：Projectile 创建帧与 Gameplay releaseFrame、AttackA release 帧一致。
+- 目标在 Stopping、Windup、Release、Recovery 各阶段死亡。
+- Attack Move 恢复：recovery 前位置不变，结束后原 CMD.FIGHT 正常继续。
+- Ground attack、手动攻击、自动反击、守卫反击。
+- 两个 Unit 同时推一个攻击者；两个 locked Unit 相互接触。
+- 爆炸 impulse、stun、transport、teleport、death 中断。
+- 保存于每个 phase，加载后继续且不会永久锁住。
+
+### 多武器
+
+- 两武器同时 ready；交错 reload；不同 windup/recovery；burst；BlockShot。
+- 连续快速武器长期锁定是否符合内容预期。
+
+### 性能
+
+- 100、1,000、10,000、20,000 Unit。
+- 统计 Sim frame、GroundMove collision、pathManager、Weapon Update 和 AOE Bridge CPU。
+- 对比 false/true 两组，特别观察攻击开始/结束波次是否出现 path invalidation 峰值。
+
+## 16. 主要风险与验收决策
+
+实现前需确认以下产品语义：
+
+1. 玩家显式 Move 是否允许取消 Windup/Recovery；本报告默认不允许。
+2. 爆炸击退是否中断攻击；本报告建议中断，而不是抵抗物理 impulse。
+3. 双 locked Unit 已重叠时是否接受短暂重叠；严格不位移与强制分离不可同时满足。
+4. attackRecoveryTime 放在 WeaponDef（推荐）还是 UnitDef。
+5. 多武器单位由哪个 weapon 驱动单一 AOE AttackA。
+
+在上述决策明确后，P0 可在不引入全局扫描和 Lua 热路径的前提下实现，且对 `attackCannotMove = false` 的现有内容保持兼容。
+
+## 17. 最终实施决策
+
+本轮实施采用 `CommandAI + CWeapon + CUnit + GroundMoveType` 组合方案，并锁定以下语义：
+
+- 首版只对 `CGroundMoveType` 生效；飞机、固定单位和 ScriptMoveType 不进入严格移动锁。
+- `attackCannotMove` 只由第一把武器驱动。其他武器保持原生开火逻辑，不创建或延长移动锁。
+- AOE Render Bridge 不遍历武器；统一读取 `CUnit` 攻击状态。AOE UnitDef 有多把武器时只输出一次 warning，并明确仅第一把武器驱动 AttackA。
+- 玩家直接下达、未带 SHIFT 且非 internal 的 `CMD_MOVE` 可以取消 Stopping、Windup 和 Recovery；队列中的 Move 不取消。
+- Windup 在首发 Projectile 前被 Move 或 impulse 中断时，取消 pending salvo 并返还 reload 冷却，但不返还资源或 stockpile。
+- 已经释放过 Projectile 后被中断时，取消剩余 salvo/recovery，但不返还 reload。
+- 爆炸 impulse 中断攻击后继续执行原生击退，不将攻击锁扩展为物理冲量免疫。
+- `attackRecoveryTime` 位于 WeaponDef，单位为秒，从最后一发 Projectile 实际释放后计时。
+- 攻击锁期间的 Unit-Unit 防推只修改现有碰撞对处理，不 Block/UnBlock、不触发 TerrainChange，也不增加全局扫描。
+
+## 18. 实施与验证记录
+
+- `cmake --build build-mingw --target engine-legacy -j 8` 完整构建成功。
+- 100v100 场景成功读回 `attackCannotMove=true`、`attackStartSpeedThreshold=0.300`、`attackRecoveryTime=0.500`。
+- 对 64 个实际开火样本检查 reload 提交帧的水平速度，全部不高于内部 0.011 elmos/frame 审计阈值，违规数为 0。
+- Windup 实测中，直接 `CMD_MOVE` 将 reloadFrame 从 179 恢复为 0，impulse 将 reloadFrame 从 182 恢复为 0；两种路径均在首发弹体前完成取消和冷却返还。
+- 100v100 原生 `CMD.FIGHT`、Projectile、伤害、死亡以及 CUnit 到 CFeature 的尸体实例转移均正常运行，没有新增断言或崩溃。
+- 10,000v10,000 场景成功创建 20,000 个 Unit/渲染实例并执行 `CMD.FIGHT`；AOE Gameplay Bridge 更新耗时约 2.4–3.5ms。测试摄像机未覆盖阵列，因此本次 GPU/Draw Call 数值不作为可见渲染性能结论。
+- 本地测试仍会输出既有的 `NOWEAPON` explodeAs/selfDestructAs 缺失，以及测试 UnitScript 缺少有效 weapon piece 的 warning；与本次实现无关。

@@ -1,0 +1,207 @@
+ 请系统调研：能否在 RecoilEngine 的 UnitDef 中新增严格攻击移动约束参数，例如：
+
+  attackCannotMove = true
+  attackStartSpeedThreshold = 0.01
+
+  使同步 Gameplay 层支持严格的“攻击期间不可移动”。
+
+  本次仅调研并输出实现方案，不修改代码。
+
+  目标语义：
+
+  发现攻击目标
+  → 请求停止移动
+  → 按正常减速度减速
+  → 实际速度降至阈值
+  → Gameplay 进入攻击动作
+  → Render Bridge 根据 Gameplay 状态播放 Attack 动画
+  → Projectile 在规定帧释放
+  → 攻击动作/后摇结束
+  → 解除移动锁并恢复原命令
+
+  核心要求：
+
+  - attackCannotMove = false 时，保持 Recoil 现有行为完全不变。
+  - 设置为 true 时，单位必须先减速至 attackStartSpeedThreshold，才能进入真正的攻击动作。
+  - 减速完成前：
+      - 不得开始 Attack 动画；
+      - 不得进入 weapon windup；
+      - 不得发射 Projectile；
+      - 不得提前刷新 reloadStatus。
+
+  - 攻击动作开始后，直到规定的 recovery 结束：
+      - 单位不得恢复 Move、Fight 或追击；
+      - 不得因目标死亡、丢失或切换目标而提前移动；
+      - 不得被其他 Unit 的碰撞、局部避障或推挤逻辑推动。
+
+  - Gameplay 不得直接调用渲染器播放动画。应由 Gameplay 暴露稳定、只读的攻击状态和时序，AOE Render Bridge 据此选择并
+    播放 AttackA，保持模块解耦。
+
+  调研内容：
+
+  1. 现有行为与根因
+
+  分析并标注以下调用链、关键文件、类、函数和行号：
+
+  - UnitDef::stopToAttack
+  - CMobileCAI::ExecuteFight
+  - CMobileCAI::ExecuteAttack
+  - CMobileCAI::ExecuteObjectAttack
+  - AMoveType::StopMoving
+  - CGroundMoveType::StopMoving
+  - CGroundMoveType::StopEngine
+  - 地面单位减速、局部避障、碰撞分离和 Unit push 逻辑
+  - CWeapon::CanFire
+  - CWeapon::UpdateFire
+  - reloadStatus、salvoWindup、salvo 和 Projectile release
+  - Unit Script 的 AimWeapon、BlockShot、FireWeapon、Shot
+  - AOE Gameplay Render Bridge 当前根据 reloadStatus触发 AttackA 的实现
+
+  重点说明：
+
+  - 为什么 stopToAttack = true 只是软停止；
+  - 为什么单位还在减速时武器已经可以进入攻击流程；
+  - 为什么临时 CMD.ATTACK 结束后，CMD.FIGHT 会在 AttackA 播放期间恢复移动；
+  - 为什么大量单位交战时，停止攻击的单位仍可能被碰撞系统推动；
+  - 当前 Gameplay 状态与 AttackA 动画状态为什么会发生偏离。
+
+  2. 参数与状态语义
+
+  评估以下参数设计是否合理，并给出推荐命名：
+
+  attackCannotMove = true
+  attackStartSpeedThreshold = 0.01
+
+  需要明确：
+
+  - 速度判断采用 CUnit::speed、MoveType 当前速度还是两者组合；
+  - 使用水平速度还是三维速度；
+  - 阈值的单位和默认值；
+  - 停止过程使用正常减速还是 hard stop；
+  - 转向是否属于允许动作；
+  - 攻击期间是否允许原地改变 heading；
+  - 攻击动作从 Aim、windup、release 还是动画第 0 帧开始；
+  - recovery 结束由 UnitDef、WeaponDef、Unit Script 信号还是统一攻击状态决定；
+  - 多武器、连发武器和不同 reload 时间如何合并移动锁；
+  - 目标死亡或丢失后是否仍完成后摇；
+  - 手动攻击、地面攻击、自动反击和 CMD.FIGHT 是否采用相同规则。
+
+  3. 防止其他 Unit 推动
+
+  重点调研 Recoil 的碰撞和推挤实现，确认如何保证：
+
+  attackCannotMove = true
+
+  且单位处于攻击锁定状态时，不会被其他 Unit 推开。
+
+  需要区分：
+
+  - 自身主动移动；
+  - 局部避障产生的位移；
+  - Unit–Unit 碰撞分离；
+  - 其他 Unit 的 push；
+  - 地形修正；
+  - 爆炸冲击或脚本强制位移；
+  - 运输、传送和死亡等特殊状态。
+
+  比较以下方案：
+
+  - 临时将攻击单位视为 pushResistant；
+  - 在碰撞分离时令攻击单位成为不可推动一方；
+  - 在 MoveType 中增加 attackMovementLocked；
+  - 每帧将单位位置恢复到攻击起始点。(不推荐)
+
+  不得采用逐帧恢复位置作为推荐方案，除非证明没有更安全的底层实现。需要分析不可推动单位是否会导致拥堵、路径死锁、重叠
+  或同步问题。
+
+  4. 推荐状态机
+
+  设计明确的同步 Gameplay 状态，例如：
+
+  Mobile
+  StoppingForAttack
+  AttackWindup
+  AttackRelease
+  AttackRecovery
+  Mobile
+
+  至少说明每个状态的：
+
+  - 进入条件；
+  - 退出条件；
+  - 是否允许平移；
+  - 是否允许转向；
+  - 是否允许被推动；
+  - 是否可以切换目标；
+  - 是否可以发射；
+  - Command Queue 如何处理；
+  - 目标死亡、武器失效、单位眩晕时如何中断。
+
+  需要避免 CommandAI、Weapon 和 Renderer 各自维护互相矛盾的攻击状态。
+
+  5. Gameplay 与 Render 的边界
+
+  Gameplay 不直接依赖或调用 AOE Renderer。
+
+  推荐由同步 Gameplay 提供紧凑、只读的状态，例如：
+
+  attackPhase
+  attackStartFrame
+  attackReleaseFrame
+  attackEndFrame
+  attackMovementLocked
+
+  AOE Gameplay Render Bridge 读取这些字段：
+
+  - StoppingForAttack：根据真实速度播放 WalkA 或 IdleA；
+  - AttackWindup/Release/Recovery：播放 AttackA；
+  - 攻击结束：根据实际速度切换 IdleA 或 WalkA；
+  - Projectile release 与 AttackA 对应帧保持一致。
+
+  调研这些字段应该位于 CUnit、CWeapon、CommandAI 还是独立攻击控制结构中，并说明存档、序列化和同步要求。
+
+  6. 实现方案比较
+
+  至少比较：
+
+  - 在 CWeapon::CanFire 中增加速度门控；
+  - 在 CMobileCAI 中维护停止和攻击恢复状态；
+  - 在 CUnit/MoveType 中增加统一攻击移动锁；
+  - CommandAI、Weapon 和 MoveType 协作的组合方案。
+
+  逐项分析：
+
+  - 是否覆盖所有攻击入口；
+  - 多武器兼容性；
+  - 是否可能永久卡在停止或攻击状态；
+  - 是否影响寻路、避障和 Command Queue；
+  - 对普通 Recoil Unit 的兼容性；
+  - 同步性、存档兼容性；
+  - 实现复杂度和维护成本。
+    -  如果可行输出实现方案到doc/todo下
+
+  7. 性能要求
+
+  目标规模为数万 Unit：
+
+  - 不得新增全局逐 Unit 搜索；
+  - 不得依赖每帧 Lua 回调；
+  - 不得产生逐帧动态分配；
+  - 状态更新应嵌入现有 CommandAI、Weapon、MoveType 和碰撞更新路径；
+  - 防推动判断应为常数时间；
+  - 评估每个 Unit/Weapon 新增字段的内存开销；
+  - 给出关键路径的时间复杂度和预计 CPU 成本。
+
+  最终输出结构化中文调研报告，包括：
+
+  - 可行性结论；
+  - 当前问题根因；
+  - 推荐 UnitDef 参数及精确定义；
+  - 推荐 Gameplay 状态机；
+  - 减速后才能攻击的实现方式；
+  - 攻击期间不可推动的实现方式；
+  - Gameplay 与 AOE Render Bridge 的数据边界；
+  - 涉及的源码文件、类、函数和行号；
+  - 多武器及特殊 Unit 处理策略；
+  - 性能与兼容性分析；
+  - 风险、测试矩阵和分阶段实施建议。

@@ -110,7 +110,8 @@ to use the original native Unit.
 ## Coordinate and state rules
 
 Recoil world positions use X/Z as the ground plane and +Y as up. Cached sprite pixels
-are converted through `Aoe2UnitPixelsToWorld` (default 1.0). Each frame's top-left foot
+are converted through `Aoe2UnitPixelsToWorld` (default 0.55 for the exported AOE2 x2
+cache baseline). Each frame's top-left foot
 anchor is preserved, while the quad axes follow the active isometric camera. The pass
 uses depth testing, disables depth writes for cached shadows, enables alpha blending,
 and restores the GL program, VAO, texture bindings, depth, blend, and culling state.

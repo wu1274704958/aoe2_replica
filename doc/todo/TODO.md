@@ -1,0 +1,7 @@
+# AOE 开发待办
+
+- [x] 修复固定长焦测试相机下尸体 `DeathA` 与程序化 `Decay` 不可见的问题。仅当 AOE 测试场景启用 `aoe_fixed_test_camera` 时，在测试启动/配置层按“相机高度 + 地图半对角线 + 安全余量”动态提高 `FeatureDrawDistance` 和 `FeatureFadeDistance`；不得修改普通游戏的默认视野和 Feature 渲染规则。验证 `CUnit -> CFeature` 实例转移、死亡动画末帧保持及渐隐过程在完整地图视野下均可见，并避免将测试配置持久化到用户的普通引擎配置。
+- [x] 将测试弓箭定义改为无击退、仅直接命中：为 `aoe_arrow` 显式设置 `impulseFactor = 0`、`impulseBoost = 0` 和 `impactOnly = true`，避免箭矢的无效微小冲量中断 `attackCannotMove` 前摇，并消除测试箭矢的范围伤害。同步将攻击距离调整为 550，核对自动索敌、LOS 和 `CMD.FIGHT` 临时接敌范围，避免引入与原生 Attack Move 语义冲突的重复距离配置。
+- [x] 修复 `attackCannotMove` 单位在临时攻击目标死亡后错误丢失返回 `CMD.FIGHT` 和原始 `CMD.FIGHT` 的问题。触发链为：目标死亡后 CommandAI 立即处理后续 Fight，但攻击 Windup/Recovery 锁使 `GroundMoveType::StartMoving` 提前返回，遗留的 `atGoal=true` 随后被 `ExecuteMove` 误判为新命令已经完成。实现位于 `CMobileCAI::ExecuteMove`：仅当单位尚未几何到达、`owner->unitDef->attackCannotMove` 且 `owner->IsAttackMovementLocked()` 时保留命令并等待解锁；`attackCannotMove=false` 的普通单位完全沿用原有分支和时序。已通过增量编译和短时双队场景启动验证。
+- [x] 补齐上述 `CMD.FIGHT` 保留修复的专项回归。新增 `aoe-attack-regression-test.txt` 和测试专用 ModOptions：8v1 场景会快速消灭临时目标，并自动在 Windup/Recovery 中分别下发原生 `CMD_MOVE`。本次实跑结果为：目标在 Windup/Recovery 死亡后原始 Fight 保留 3/3，显式 Move 取消攻击锁 2/2；敌方清空 600 帧后 8/8 存活单位命令队列为空且远离目标的停滞数为 0。另以 `aoe_attack_cannot_move=0` 实跑普通分支，单位保持原生移动中开火行为，新增逻辑未介入。
+- [x] 修复 `attackCannotMove` 单位交战期间的小范围位置抖动。新增 O(1) 的 `CUnit::IsAttackCollisionLocked()`：仅当 UnitDef 开启严格静止攻击、第一把武器仍持有目标且单位速度已满足攻击起步阈值时，将攻击各阶段及装填间隔视为连续碰撞保护期。`GroundMoveType` 仍执行碰撞检测与事件分发，也允许未锁定邻居避让，但不再把 Unit/Feature/静态碰撞响应力施加到受保护单位；自身寻路、显式命令与爆炸 impulse/skid 路径不受影响。诊断只统计前后目标及命令不变的连续锁定区间，100v100 和 8v1 实跑均为静止位移违规 0；专项场景累计 1,574 个保护采样区间，最大违规位移 0。
