@@ -13,10 +13,13 @@ if not gadgetHandler:IsSyncedCode() then
 	local modOptions = Spring.GetModOptions()
 	local fixedCameraValue = tostring(modOptions.aoe_fixed_test_camera or "false"):lower()
 	local fixedCameraEnabled = fixedCameraValue == "1" or fixedCameraValue == "true" or fixedCameraValue == "yes" or fixedCameraValue == "on"
+	local meleeCalibrationValue = tostring(modOptions.aoe_melee_calibration or "false"):lower()
+	local meleeBattleValue = tostring(modOptions.aoe_melee_battle or "false"):lower()
+	local meleeTestEnabled = meleeCalibrationValue == "1" or meleeCalibrationValue == "true" or meleeBattleValue == "1" or meleeBattleValue == "true"
 	local fixedTestCamera = VFS.Include("LuaRules/aoe_fixed_test_camera.lua")
 
 	function gadget:Initialize()
-		if not fixedCameraEnabled then
+		if meleeTestEnabled or not fixedCameraEnabled then
 			return
 		end
 		local cameraApplied, cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance = fixedTestCamera.Apply()
@@ -57,9 +60,12 @@ local requestedSpacing = ReadNumberOption("aoe_team_spacing", 42, 8, 256)
 local requestedSeparation = ReadNumberOption("aoe_team_separation", 1400, 64, 8192)
 local attackMoveStartFrame = math.floor(ReadNumberOption("aoe_attack_move_start_frame", 150, 1, 36000))
 local counterAttack = ReadBooleanOption("aoe_team_b_counter_attack", false)
+local camelScoutFraction = ReadNumberOption("aoe_camel_scout_fraction", 0, 0, 1)
 local globalLosForTeamA = ReadBooleanOption("aoe_global_los", true)
 local anchorValidation = ReadBooleanOption("aoe_anchor_validation", false)
 local anchorCalibration = ReadBooleanOption("aoe_anchor_calibration", false)
+local meleeCalibration = ReadBooleanOption("aoe_melee_calibration", false)
+local meleeBattle = ReadBooleanOption("aoe_melee_battle", false)
 local positionDiagnosticEnabled = ReadBooleanOption("aoe_position_diagnostics", true)
 local positionDiagnosticSamplesPerTeam = math.floor(ReadNumberOption("aoe_position_diagnostic_samples", 64, 1, 128))
 local explicitMoveRegressionEnabled = ReadBooleanOption("aoe_explicit_move_regression", false)
@@ -190,22 +196,71 @@ end
 
 local formationSpacing, formationSeparation = ConfigureLayout()
 
+local function GetFrontCamelSlots(team, camelCount)
+	local dimensions = team.dimensions
+	local slots = {}
+	for index = 1, team.count do
+		local column = (index - 1) % dimensions.columns
+		local row = math.floor((index - 1) / dimensions.columns)
+		slots[#slots + 1] = {
+			index = index,
+			column = column,
+			row = row,
+		}
+	end
+
+	table.sort(slots, function(a, b)
+		if a.column ~= b.column then
+			if team.facing == "east" then
+				return a.column > b.column
+			end
+			return a.column < b.column
+		end
+
+		local centerRow = (dimensions.rows - 1) * 0.5
+		local aCenterDistance = math.abs(a.row - centerRow)
+		local bCenterDistance = math.abs(b.row - centerRow)
+		if aCenterDistance ~= bCenterDistance then
+			return aCenterDistance < bCenterDistance
+		end
+		return a.row < b.row
+	end)
+
+	local camelSlots = {}
+	for index = 1, camelCount do
+		camelSlots[slots[index].index] = true
+	end
+	return camelSlots
+end
+
 local function SpawnFormation(team)
 	local dimensions = team.dimensions
+	local requestedCamelCount = math.floor(team.count * camelScoutFraction + 0.5)
+	local camelSlots = GetFrontCamelSlots(team, requestedCamelCount)
+	local createdCamelCount = 0
+	local createdArcherCount = 0
 	for index = 1, team.count do
 		local column = (index - 1) % dimensions.columns
 		local row = math.floor((index - 1) / dimensions.columns)
 		local x = team.center.x - dimensions.width * 0.5 + column * formationSpacing
 		local z = team.center.z - dimensions.depth * 0.5 + row * formationSpacing
-		local unitID = Spring.CreateUnit("aoe_archer", x, Spring.GetGroundHeight(x, z), z, team.facing, team.teamID)
+		local unitName = camelSlots[index] and "aoe_camel_scout" or "aoe_archer"
+		local unitID = Spring.CreateUnit(unitName, x, Spring.GetGroundHeight(x, z), z, team.facing, team.teamID)
 		if unitID then
 			team.units[#team.units + 1] = unitID
+			if camelSlots[index] then
+				createdCamelCount = createdCamelCount + 1
+			else
+				createdArcherCount = createdArcherCount + 1
+			end
 		end
 	end
 
 	Spring.Echo(string.format(
-		"[AOE Gameplay Test] Team %s created=%d/%d center=(%.1f, %.1f) grid=%dx%d",
-		team.name, #team.units, team.count, team.center.x, team.center.z,
+		"[AOE Gameplay Test] Team %s created=%d/%d camel=%d/%d archer=%d center=(%.1f, %.1f) grid=%dx%d",
+		team.name, #team.units, team.count,
+		createdCamelCount, requestedCamelCount, createdArcherCount,
+		team.center.x, team.center.z,
 		dimensions.columns, dimensions.rows
 	))
 end
@@ -877,6 +932,10 @@ local function SpawnAnchorValidation()
 end
 
 function gadget:GameStart()
+	if meleeCalibration or meleeBattle then
+		return
+	end
+
 	local archerDef = UnitDefs[UnitDefNames.aoe_archer.id]
 	local arrowDef = WeaponDefs[WeaponDefNames.aoe_arrow.id]
 	Spring.Echo(string.format(
@@ -922,7 +981,7 @@ function gadget:GameStart()
 end
 
 function gadget:GameFrame(frame)
-	if anchorCalibration then
+	if anchorCalibration or meleeCalibration or meleeBattle then
 		return
 	end
 

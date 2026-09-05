@@ -115,6 +115,27 @@ AOE 尸体 Feature 的 `DeathA` 和程序化 `Decay` 在长焦视角下可见；
 该场景固定生成 16 个方向的 `aoe_archer`，详细操作和导出边界参见
 `doc/aoe_anchor_calibration.md`。
 
+### 运行 Camel Scout 近战测试
+
+全方向近战碰撞、射程和伤害帧校准：
+
+```powershell
+.\build-official-release\extract\spring-dev.exe `
+  --write-dir "$PWD\build-test-runtime" `
+  "$PWD\build-test-runtime\aoe-melee-calibration-test.txt"
+```
+
+双队原生 `CMD.FIGHT` 实战：
+
+```powershell
+.\build-official-release\extract\spring-dev.exe `
+  --write-dir "$PWD\build-test-runtime" `
+  "$PWD\build-test-runtime\aoe-melee-gameplay-test.txt"
+```
+
+交互方式、Def 换算、运行时覆盖边界和期望伤害时序参见
+`doc/aoe_melee_calibration.md`。
+
 ### 运行 attackCannotMove 专项回归
 
 ```powershell

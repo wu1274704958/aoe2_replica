@@ -1,0 +1,71 @@
+[GAME]
+{
+	IsHost=1;
+	MyPlayerName=RecoilMeleeCalibration;
+	MapName=AOE Blank Map Test;
+	GameType=AOE Render Test 0.6;
+	InitBlank=1;
+	GameStartDelay=0;
+	StartPosType=0;
+	RecordDemo=0;
+	FixedRNGSeed=1;
+	NumPlayers=1;
+	NumTeams=2;
+	NumAllyTeams=2;
+
+	[MAPOPTIONS]
+	{
+		blank_map_x=20;
+		blank_map_y=10;
+		blank_map_height=32;
+		blank_map_color_r=72;
+		blank_map_color_g=112;
+		blank_map_color_b=72;
+	}
+
+	[MODOPTIONS]
+	{
+		LuaGaia=0;
+		LuaRules=1;
+		aoe_fixed_test_camera=1;
+		aoe_anchor_calibration=0;
+		aoe_melee_calibration=1;
+		aoe_melee_battle=0;
+		aoe_melee_calibration_spacing=260;
+		aoe_melee_target_distance=44;
+		aoe_melee_approach_distance=96;
+		aoe_melee_damage=1;
+		aoe_melee_start_auto_attack=0;
+	}
+
+	[PLAYER0]
+	{
+		Name=RecoilMeleeCalibration;
+		Spectator=0;
+		Team=0;
+	}
+
+	[TEAM0]
+	{
+		TeamLeader=0;
+		AllyTeam=0;
+		RGBColor=0.20 0.65 1.00;
+	}
+
+	[TEAM1]
+	{
+		TeamLeader=0;
+		AllyTeam=1;
+		RGBColor=0.95 0.25 0.20;
+	}
+
+	[ALLYTEAM0]
+	{
+		NumAllies=0;
+	}
+
+	[ALLYTEAM1]
+	{
+		NumAllies=0;
+	}
+}

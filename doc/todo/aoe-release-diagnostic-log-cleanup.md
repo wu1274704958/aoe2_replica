@@ -51,6 +51,13 @@
 - 诊断问题：锚点校准工具的初始化、固定相机、原生碰撞体对照、运行时 muzzle override、地面攻击、Reset 和导出状态；用于定位 Sprite 与 3D 碰撞体、受击点及发射点不重合的问题。
 - Release 处理：这是开发工具交互日志，不应逐条当作异常删除。Release 包应排除整套校准场景，或仅在 `AOE_DEV_TOOL=1` 的开发构建中提供。
 
+### `[AOE Melee Calibration]` / `[AOE Melee Battle]`
+
+- 位置：`build-test-runtime/games/AoeRenderTest.sdd/LuaRules/Gadgets/game_aoe_melee_test.lua`
+- 启动配置：`build-test-runtime/aoe-melee-calibration-test.txt`、`build-test-runtime/aoe-melee-gameplay-test.txt`。
+- 诊断问题：原生 `CMeleeWeapon` 的接敌距离、碰撞边缘卡死、AttackA 第 10 帧与直接伤害的同步、`attackCannotMove` 停步攻击，以及双队死亡和尸体生命周期。
+- Release 处理：整个 Gadget 和所有日志保持测试场景专用；若测试内容随发行包保留，必须默认关闭两个 ModOption，禁止普通游戏进入周期统计路径。
+
 ## C++ 渲染诊断日志
 
 ### `[Aoe2UnitRenderer]`
@@ -90,4 +97,4 @@
 - [ ] 大规模战斗日志中不再出现逐 Unit、逐帧或固定周期的诊断输出。
 - [ ] 保留 OpenGL、Shader、资源缺失、非法 UnitDef/WeaponDef 等可操作的 warning/error。
 - [ ] 如需保留性能指标，改为显式配置开启，并确认关闭时没有额外逐帧扫描或格式化开销。
-- [ ] 用 `rg "AOE Position Diagnostic|AOE Move Diagnostic|AOE Attack Regression|AOE Gameplay Test|AOE Anchor Test|AOE Anchor Calibration|Aoe2UnitRenderer|Aoe2GameplayBridge|Aoe2ProjectileBridge"` 复核遗漏。
+- [ ] 用 `rg "AOE Position Diagnostic|AOE Move Diagnostic|AOE Attack Regression|AOE Gameplay Test|AOE Anchor Test|AOE Anchor Calibration|AOE Melee Calibration|AOE Melee Battle|Aoe2UnitRenderer|Aoe2GameplayBridge|Aoe2ProjectileBridge"` 复核遗漏。

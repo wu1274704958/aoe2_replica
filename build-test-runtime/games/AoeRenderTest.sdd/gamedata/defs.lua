@@ -8,11 +8,13 @@ local attackCannotMove =
 
 return {
 	UnitDefs = {
-			aoe_archer = {
+		aoe_archer = {
 			name = "AOE Gameplay Archer",
 			description = "Native Recoil Gameplay Unit with an AOE2 render appearance",
 			objectName = "fir_tree_smallest.s3o",
 			script = "aoe_archer.lua",
+			explodeAs = "NOWEAPON",
+			selfDestructAs = "NOWEAPON",
 			category = "LAND",
 			footprintX = 2,
 			footprintZ = 2,
@@ -61,6 +63,61 @@ return {
 					{ name = "AOE_ARROW" },
 				},
 			},
+		aoe_camel_scout = {
+			name = "AOE Camel Scout",
+			description = "Native Recoil melee gameplay unit with an AOE2 render appearance",
+			objectName = "fir_tree_smallest.s3o",
+			script = "aoe_camel_scout.lua",
+			explodeAs = "NOWEAPON",
+			selfDestructAs = "NOWEAPON",
+			category = "LAND",
+			footprintX = 2,
+			footprintZ = 2,
+			collisionVolumeType = "CylY",
+			-- DAT collision_size=(0.25, 0.25, 2.0). Keep the validated
+			-- horizontal*60 and vertical*30 AOE-to-Recoil conversion explicit.
+			collisionVolumeScales = "30 60 30",
+			maxDamage = 120,
+			buildCostMetal = 1,
+			buildTime = 1,
+			power = 1,
+			mass = 80,
+			canMove = true,
+			canGuard = true,
+			canPatrol = true,
+			canStop = true,
+			canAttack = true,
+			canFireControl = true,
+			corpse = "aoe_camel_scout_dead",
+			movementClass = "AOE2_TEST_UNIT",
+			speed = 105,
+			maxAcc = 0.18,
+			maxDec = 0.30,
+			turnRate = 1200,
+			turnInPlace = true,
+			stopToAttack = true,
+			attackCannotMove = attackCannotMove,
+			attackStartSpeedThreshold = 0.3,
+			upright = true,
+			sightDistance = 500,
+			customParams = {
+				aoe2_unit_id = "u_cam_camel_scout",
+				aoe2_scale = "1.0",
+				aoe2_ground_offset = "0.0",
+				aoe2_player_color = "team",
+				aoe2_hide_native_model = "true",
+				aoe2_animation_speed = "1.0",
+				-- Melee has no projectile muzzle. Supplying the body-centre
+				-- weapon anchor keeps native range and facing checks independent
+				-- of the hidden placeholder model's pieces.
+				aoe2_aim_local = "0 30 0",
+				aoe2_weapon1_muzzle_local = "0 30 0",
+				aoe2_weapon1_forward_local = "0 0 1",
+			},
+			weapons = {
+				{ name = "AOE_CAMEL_SCOUT_MELEE" },
+			},
+		},
 		},
 	FeatureDefs = {
 		aoe_archer_dead = {
@@ -82,8 +139,35 @@ return {
 				aoe2_corpse_fade_frames = "60",
 			},
 		},
+		aoe_camel_scout_dead = {
+			description = "AOE camel scout corpse gameplay host",
+			object = "fir_tree_smallest.s3o",
+			blocking = true,
+			reclaimable = true,
+			resurrectable = 0,
+			smokeTime = 0,
+			health = 120,
+			metal = 1,
+			footprintX = 2,
+			footprintZ = 2,
+			customParams = {
+				aoe2_corpse = "true",
+				aoe2_unit_id = "u_cam_camel_scout",
+				aoe2_death_frames = "45",
+				aoe2_corpse_hold_frames = "120",
+				aoe2_corpse_fade_frames = "60",
+			},
+		},
 	},
 	WeaponDefs = {
+		noweapon = {
+			name = "No death explosion",
+			weaponType = "Melee",
+			areaOfEffect = 0,
+			impulseFactor = 0,
+			impulseBoost = 0,
+			damage = { default = 0 },
+		},
 		aoe_arrow = {
 			name = "Native test arrow",
 			weaponType = "Cannon",
@@ -104,11 +188,35 @@ return {
 			-- face the target before firing. 1820 legacy angle units is about 10°.
 			turret = false,
 			tolerance = 1820,
+			avoidFriendly = false,
+			collideFriendly = false,
+			avoidFeature = false,
+			collideFeature = false,
 			damage = { default = 5 },
 			customParams = {
 				aoe2_projectile_id = "p_arrow",
 				aoe2_projectile_scale = "1.0",
 			},
+		},
+		aoe_camel_scout_melee = {
+			name = "Native camel scout melee attack",
+			weaponType = "Melee",
+			areaOfEffect = 0,
+			canAttackGround = false,
+			impulseFactor = 0,
+			impulseBoost = 0,
+			range = 32,
+			reloadtime = 2,
+			-- The manifest releases on AttackA frame 10 of 30 at 30 FPS.
+			-- Recovery covers the remaining 20 frames so Gameplay owns the
+			-- complete one-second attack animation interval.
+			windup = 0.3333333333,
+			attackRecoveryTime = 0.6666666667,
+			targetBorder = 1,
+			cylinderTargeting = 1,
+			turret = false,
+			tolerance = 1820,
+			damage = { default = 10 },
 		},
 	},
 	ArmorDefs = {},
