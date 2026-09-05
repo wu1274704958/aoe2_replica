@@ -277,6 +277,13 @@ if (ENABLE_AOE2_UNIT_RENDERER)
 	add_definitions(-DENABLE_AOE2_UNIT_RENDERER)
 endif ()
 
+option(AOE_DEV_TOOL "Build AOE development-only Lua tooling APIs" ON)
+if (AOE_DEV_TOOL)
+	add_definitions(-DAOE_DEV_TOOL=1)
+else ()
+	add_definitions(-DAOE_DEV_TOOL=0)
+endif ()
+
 if    (WIN32)
 	## internal AVI recorder (w/o sound atm)
 	option(NO_AVI "Disable in-game video recording" FALSE)

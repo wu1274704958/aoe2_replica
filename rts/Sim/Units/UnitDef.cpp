@@ -22,7 +22,60 @@
 
 #include "System/Misc/TracyDefs.h"
 
+#include <cmath>
+#include <sstream>
+
 /******************************************************************************/
+
+namespace {
+
+bool ParseAnchorVector(const spring::unordered_map<std::string, std::string>& params, const char* key, float3& value)
+{
+	const auto it = params.find(key);
+	if (it == params.end())
+		return false;
+
+	std::istringstream stream(it->second);
+	float3 parsed;
+	char trailing = 0;
+	if (!(stream >> parsed.x >> parsed.y >> parsed.z) || (stream >> trailing) ||
+		!std::isfinite(parsed.x) || !std::isfinite(parsed.y) || !std::isfinite(parsed.z)) {
+		LOG_L(L_WARNING, "UnitDef anchor %s has invalid vector '%s'", key, it->second.c_str());
+		return false;
+	}
+
+	value = parsed;
+	return true;
+}
+
+void ParseUnitDefAnchors(UnitDef& unitDef)
+{
+	if (!ParseAnchorVector(unitDef.customParams, "aoe2_aim_local", unitDef.anchors.aimLocal))
+		return;
+
+	unitDef.anchors.enabled = true;
+	unitDef.anchors.weapons.resize(unitDef.NumWeapons());
+	for (std::size_t weaponIndex = 0; weaponIndex < unitDef.anchors.weapons.size(); ++weaponIndex) {
+		auto& anchor = unitDef.anchors.weapons[weaponIndex];
+		const std::string muzzleKey = "aoe2_weapon" + std::to_string(weaponIndex + 1) + "_muzzle_local";
+		if (!ParseAnchorVector(unitDef.customParams, muzzleKey.c_str(), anchor.muzzleLocal))
+			continue;
+
+		const std::string forwardKey = "aoe2_weapon" + std::to_string(weaponIndex + 1) + "_forward_local";
+		ParseAnchorVector(unitDef.customParams, forwardKey.c_str(), anchor.forwardLocal);
+		if (anchor.forwardLocal.SqLength() <= float3::cmp_eps()) {
+			LOG_L(L_WARNING, "UnitDef %s anchor %s must not be zero; using forward", unitDef.name.c_str(), forwardKey.c_str());
+			anchor.forwardLocal = FwdVector;
+		}
+		anchor.forwardLocal.SafeNormalize();
+		anchor.enabled = true;
+	}
+
+	LOG_L(L_INFO, "UnitDef %s uses local AOE anchors: aim=(%.3f, %.3f, %.3f)",
+		unitDef.name.c_str(), unitDef.anchors.aimLocal.x, unitDef.anchors.aimLocal.y, unitDef.anchors.aimLocal.z);
+}
+
+}
 
 UnitDefWeapon::UnitDefWeapon(const WeaponDef* weaponDef) {
 	*this = UnitDefWeapon();
@@ -717,6 +770,7 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 
 		// custom parameters table
 		paramsTable.GetMap(customParams);
+		ParseUnitDefAnchors(*this);
 	}
 	{
 		const LuaTable&      sfxTable =  udTable.SubTable("SFXTypes");

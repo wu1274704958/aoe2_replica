@@ -106,6 +106,13 @@ public:
 	bool IsFastAutoRetargetingEnabled() const { return fastAutoRetargeting; }
 	void UpdateWeaponErrorVector();
 	void UpdateWeaponVectors();
+#if AOE_DEV_TOOL
+	void SetAoe2MuzzleOverride(const float3& localPos) {
+		aoe2MuzzleOverride = localPos;
+		aoe2MuzzleOverrideEnabled = true;
+	}
+	void ClearAoe2MuzzleOverride() { aoe2MuzzleOverrideEnabled = false; }
+#endif
 protected:
 	virtual void FireImpl(const bool scriptCall) {}
 	virtual void UpdateWantedDir();
@@ -213,6 +220,11 @@ public:
 	float3 salvoError;                      // error vector for the whole salvo
 	float3 errorVector;
 	float3 errorVectorAdd;
+
+#if AOE_DEV_TOOL
+	float3 aoe2MuzzleOverride;
+	bool aoe2MuzzleOverrideEnabled;
+#endif
 
 	float muzzleFlareSize;                  // size of muzzle flare if drawn
 

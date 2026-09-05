@@ -5916,12 +5916,41 @@ int LuaSyncedRead::GetUnitMoveTypeData(lua_State* L)
 
 	AMoveType* amt = unit->moveType;
 
-	lua_createtable(L, 0, 26);
+	lua_createtable(L, 0, 35);
 	HSTR_PUSH_NUMBER(L, "maxSpeed", amt->GetMaxSpeed() * GAME_SPEED);
 	HSTR_PUSH_NUMBER(L, "maxWantedSpeed", amt->GetMaxWantedSpeed() * GAME_SPEED);
 	HSTR_PUSH_NUMBER(L, "goalx", amt->goalPos.x);
 	HSTR_PUSH_NUMBER(L, "goaly", amt->goalPos.y);
 	HSTR_PUSH_NUMBER(L, "goalz", amt->goalPos.z);
+
+	#if AOE_DEV_TOOL
+	if (unit->unitDef->attackCannotMove) {
+		HSTR_PUSH_BOOL(L, "attackMovementLocked", unit->IsAttackMovementLocked());
+		HSTR_PUSH_BOOL(L, "attackCollisionLocked", unit->IsAttackCollisionLocked());
+		HSTR_PUSH_BOOL(L, "attackAnimationActive", unit->IsAttackAnimationActive());
+		HSTR_PUSH_NUMBER(L, "attackMotionStartFrame", unit->GetAttackMotionStartFrame());
+		HSTR_PUSH_NUMBER(L, "attackMotionReleaseFrame", unit->GetAttackMotionReleaseFrame());
+		HSTR_PUSH_NUMBER(L, "attackMotionEndFrame", unit->GetAttackMotionEndFrame());
+
+		switch (unit->GetAttackMotionPhase()) {
+			case AttackMotionPhase::Mobile:
+				HSTR_PUSH_CSTRING(L, "attackMotionPhase", "mobile");
+				break;
+			case AttackMotionPhase::StoppingForAttack:
+				HSTR_PUSH_CSTRING(L, "attackMotionPhase", "stopping");
+				break;
+			case AttackMotionPhase::AttackWindup:
+				HSTR_PUSH_CSTRING(L, "attackMotionPhase", "windup");
+				break;
+			case AttackMotionPhase::AttackRelease:
+				HSTR_PUSH_CSTRING(L, "attackMotionPhase", "release");
+				break;
+			case AttackMotionPhase::AttackRecovery:
+				HSTR_PUSH_CSTRING(L, "attackMotionPhase", "recovery");
+				break;
+		}
+	}
+	#endif
 
 	switch (amt->progressState) {
 		case AMoveType::Done:

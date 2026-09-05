@@ -39,10 +39,10 @@ CONFIG(std::string, Aoe2UnitCachePath)
 	.defaultValue("cont/aoe2de_cache")
 	.description("Local AOE2 cache root; this content is not redistributed");
 CONFIG(float, Aoe2UnitPixelsToWorld)
-	.defaultValue(1.0f)
+	.defaultValue(0.55f)
 	.minimumValue(0.01f)
 	.maximumValue(10.0f)
-	.description("Conversion from cached sprite pixels to Recoil world units");
+	.description("Conversion from cached sprite pixels to Recoil world units (AOE2 x2 cache baseline)");
 CONFIG(float, Aoe2UnitMainCameraBias)
 	.defaultValue(4.0f)
 	.minimumValue(0.0f)
@@ -920,6 +920,9 @@ void Aoe2RendererImpl::RebuildBatches()
 void Aoe2RendererImpl::Update()
 {
 	const auto started = std::chrono::steady_clock::now();
+	// Keep this lightweight renderer-only setting live so the anchor calibration
+	// scene can tune sprite scale without restarting or touching synced state.
+	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
 	const float deltaSeconds = std::clamp(globalRendering->lastFrameTime * 0.001f, 0.0f, 0.1f);
 	testElapsed += deltaSeconds;
 	if (!testHandles.empty() && !testCameraConfigured && camHandler != nullptr &&

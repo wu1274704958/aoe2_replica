@@ -54,6 +54,23 @@ struct UnitDefWeapon {
 };
 
 
+// A local anchor is expressed in Recoil unit space: X is right, Y is up, and
+// Z is forward.  It is intentionally independent of a model piece so sprite
+// based units can use native weapons without a proxy model defining sockets.
+struct UnitDefWeaponAnchor {
+	float3 muzzleLocal = ZeroVector;
+	float3 forwardLocal = FwdVector;
+	bool enabled = false;
+};
+
+
+struct UnitDefAnchorSet {
+	float3 aimLocal = ZeroVector;
+	std::vector<UnitDefWeaponAnchor> weapons;
+	bool enabled = false;
+};
+
+
 struct UnitDef: public SolidObjectDef
 {
 public:
@@ -235,6 +252,7 @@ public:
 	std::string buildPicName;
 
 	std::array<UnitDefWeapon, MAX_WEAPONS_PER_UNIT> weapons;
+	UnitDefAnchorSet anchors;
 
 	///< The unrotated yardmap for buildings
 	///< (only non-mobile ground units can have these)

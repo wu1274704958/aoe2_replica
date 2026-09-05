@@ -105,6 +105,7 @@ public:
 	bool SupportsAttackMoveLock() const;
 	bool IsAttackStartSpeedSatisfied() const;
 	bool IsAttackMovementLocked() const;
+	bool IsAttackCollisionLocked() const;
 	bool IsAttackAnimationActive() const;
 	bool IsStoppingForAttack(const CWeapon* weapon) const;
 	void ResetAttackMotionState();

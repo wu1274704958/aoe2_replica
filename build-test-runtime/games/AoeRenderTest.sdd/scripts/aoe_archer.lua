@@ -7,14 +7,6 @@ end
 function script.StopMoving()
 end
 
-function script.QueryWeapon()
-	return 0
-end
-
-function script.AimFromWeapon()
-	return 0
-end
-
 function script.AimWeapon()
 	return true
 end

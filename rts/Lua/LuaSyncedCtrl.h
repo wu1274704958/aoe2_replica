@@ -92,6 +92,9 @@ class LuaSyncedCtrl
 		static int SetUnitStockpile(lua_State* L);
 		static int SetUnitUseWeapons(lua_State* L);
 		static int SetUnitWeaponState(lua_State* L);
+#if AOE_DEV_TOOL
+		static int SetUnitAoe2WeaponMuzzleOverride(lua_State* L);
+#endif
 		static int SetUnitWeaponDamages(lua_State* L);
 		static int SetUnitMaxRange(lua_State* L);
 		static int SetUnitExperience(lua_State* L);

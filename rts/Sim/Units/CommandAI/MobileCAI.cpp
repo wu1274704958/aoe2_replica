@@ -400,6 +400,23 @@ void CMobileCAI::ExecuteMove(Command& c)
 	const float3& ownPos = owner->pos;
 
 	const float sqGoalDist = cmdPos.SqDistance2D(ownPos);
+	const float sqGoalRadius = Square(moveType->GetGoalRadius(1.0f));
+
+	// StopMoving leaves the move-type at its current position and can leave
+	// IsAtGoal true.  Starting the pending move while an attack motion is
+	// locked is deliberately rejected by GroundMoveType, so do not let that
+	// stale state complete and discard the command.  Once the lock expires a
+	// later SlowUpdate will start it through the normal path below.
+	//
+	// Keep this exception strictly scoped to attackCannotMove units; all other
+	// units retain the original move-command completion timing.
+	if (
+		sqGoalDist >= sqGoalRadius &&
+		owner->unitDef->attackCannotMove &&
+		owner->IsAttackMovementLocked()
+	) {
+		return;
+	}
 
 	// this check is important to process failed orders properly
 	// NB: only works if the *non-extended* goal radius is passed
@@ -408,7 +425,7 @@ void CMobileCAI::ExecuteMove(Command& c)
 
 	// compare against the moveType's own (possibly extended)
 	// goal radius to determine if we can finish the command
-	if (sqGoalDist < Square(moveType->GetGoalRadius(1.0f)) || moveType->IsAtGoal()) {
+	if (sqGoalDist < sqGoalRadius || moveType->IsAtGoal()) {
 		if (!HasMoreMoveCommands())
 			StopMove();
 

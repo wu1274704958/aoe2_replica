@@ -1,0 +1,56 @@
+return {
+	aoe_fixed_test_camera = {
+		name = "AOE fixed test camera",
+		desc = "Use the shared 5-degree telephoto camera in AOE gameplay test scenes",
+		type = "bool",
+		def = false,
+	},
+	aoe_anchor_calibration = {
+		name = "AOE anchor calibration",
+		desc = "Spawn the static all-direction AOE remote-unit anchor calibration scene",
+		type = "bool",
+		def = false,
+	},
+	aoe_anchor_calibration_spacing = {
+		name = "AOE calibration spacing",
+		desc = "World-space spacing between calibration units",
+		type = "number",
+		def = 260,
+		min = 64,
+		max = 1024,
+		step = 1,
+	},
+	aoe_anchor_calibration_ground_attack = {
+		name = "AOE calibration ground attack",
+		desc = "Make all 16 calibration units attack the ground directly ahead using native CMD.ATTACK",
+		type = "bool",
+		def = false,
+	},
+	aoe_position_diagnostics = {
+		name = "AOE position diagnostics",
+		desc = "Log bounded position timelines when attackCannotMove units make short reverse movements",
+		type = "bool",
+		def = true,
+	},
+	aoe_position_diagnostic_samples = {
+		name = "AOE position diagnostic samples",
+		desc = "Maximum number of evenly distributed units sampled per team",
+		type = "number",
+		def = 64,
+		min = 1,
+		max = 128,
+		step = 1,
+	},
+	aoe_attack_cannot_move = {
+		name = "AOE strict stationary attack",
+		desc = "Enable attackCannotMove on the test archer; disable for ordinary-movement regression",
+		type = "bool",
+		def = true,
+	},
+	aoe_explicit_move_regression = {
+		name = "AOE explicit Move regression",
+		desc = "Issue native CMD.MOVE during sampled Windup and Recovery phases and report pass/fail",
+		type = "bool",
+		def = false,
+	},
+}

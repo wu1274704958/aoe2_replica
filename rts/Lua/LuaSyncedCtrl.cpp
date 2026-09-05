@@ -195,6 +195,9 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(SetUnitStockpile);
 	REGISTER_LUA_CFUNC(SetUnitUseWeapons);
 	REGISTER_LUA_CFUNC(SetUnitWeaponState);
+#if AOE_DEV_TOOL
+	REGISTER_LUA_CFUNC(SetUnitAoe2WeaponMuzzleOverride);
+#endif
 	REGISTER_LUA_CFUNC(SetUnitWeaponDamages);
 	REGISTER_LUA_CFUNC(SetUnitMaxRange);
 	REGISTER_LUA_CFUNC(SetUnitExperience);
@@ -2588,6 +2591,59 @@ int LuaSyncedCtrl::SetUnitWeaponState(lua_State* L)
 
 	return 0;
 }
+
+#if AOE_DEV_TOOL
+/*** Overrides an AOE weapon's local muzzle position for development tools.
+ *
+ * This API is only available in builds configured with `AOE_DEV_TOOL=1`.
+ * Passing no local position clears the per-weapon override and restores the
+ * muzzle configured by the UnitDef.
+ *
+ * @function Spring.SetUnitAoe2WeaponMuzzleOverride
+ * @param unitID integer
+ * @param weaponNum integer
+ * @param localX number?
+ * @param localY number?
+ * @param localZ number?
+ * @return boolean applied
+ */
+int LuaSyncedCtrl::SetUnitAoe2WeaponMuzzleOverride(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+
+	if (unit == nullptr) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	const size_t weaponNum = luaL_checkint(L, 2) - LUA_WEAPON_BASE_INDEX;
+	if (weaponNum >= unit->weapons.size() || weaponNum >= unit->unitDef->anchors.weapons.size()) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	if (!unit->unitDef->anchors.weapons[weaponNum].enabled) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	CWeapon* weapon = unit->weapons[weaponNum];
+	if (lua_isnoneornil(L, 3)) {
+		weapon->ClearAoe2MuzzleOverride();
+	} else {
+		const float3 localPos = {
+			luaL_checkfloat(L, 3),
+			luaL_checkfloat(L, 4),
+			luaL_checkfloat(L, 5),
+		};
+		weapon->SetAoe2MuzzleOverride(localPos);
+	}
+
+	weapon->UpdateWeaponVectors();
+	lua_pushboolean(L, true);
+	return 1;
+}
+#endif
 
 /*** Parameters for damage
  *

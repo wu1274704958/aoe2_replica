@@ -1,3 +1,3 @@
--- The test has no unsynced LuaRules logic, but Recoil requires both halves of
--- a split LuaRules handle to contain loadable code.
-return
+-- Load the unsynced halves of test gadgets.  World-space calibration overlays,
+-- the on-screen controls, and input handling all run through this handle.
+VFS.Include("LuaGadgets/gadgets.lua", nil, VFS.BASE)

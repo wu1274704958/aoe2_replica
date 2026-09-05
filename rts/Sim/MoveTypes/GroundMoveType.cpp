@@ -2554,6 +2554,14 @@ void CGroundMoveType::HandleObjectCollisions()
 		forceStaticObjectCheck = false;
 	}
 
+	// Collision callbacks above must still run, and unlocked neighbours must
+	// still be able to move away.  Only discard the response accumulated for
+	// this unit while an attackCannotMove engagement owns its position.  This
+	// does not suppress weapon impulses, skidding, script movement, or the
+	// unit's own path movement; all of those use separate state/force paths.
+	if (collider->IsAttackCollisionLocked())
+		return;
+
 	// auto canAssignForce = [colliderMD, collider, curThread](const float3& force) {
 	// 	if (force.same(ZeroVector))
 	// 		return false;
@@ -2933,8 +2941,12 @@ void CGroundMoveType::HandleUnitCollisions(
 		pushCollider = pushCollider && (!collider->beingBuilt && !collider->UsingScriptMoveType() && !collider->moveType->IsPushResistant());
 		pushCollidee = pushCollidee && (!collidee->beingBuilt && !collidee->UsingScriptMoveType() && !collidee->moveType->IsPushResistant());
 
-		const bool colliderAttackLocked = collider->IsAttackMovementLocked();
-		const bool collideeAttackLocked = collidee->IsAttackMovementLocked();
+		// attackCannotMove units remain collision-stable between attack cycles
+		// while their first weapon retains a target.  This is deliberately
+		// separate from the stricter motion lock so own path movement, explicit
+		// moves, and physical impulses can still move the unit normally.
+		const bool colliderAttackLocked = collider->IsAttackCollisionLocked();
+		const bool collideeAttackLocked = collidee->IsAttackCollisionLocked();
 		pushCollider &= !colliderAttackLocked;
 		pushCollidee &= !collideeAttackLocked;
 
@@ -2943,6 +2955,13 @@ void CGroundMoveType::HandleUnitCollisions(
 
 		const bool isStatic = (!collideeMobile && !collideeUD->IsAirUnit()) || (!pushCollider && !pushCollidee);
 		if (isCollision && isStatic) {
+			// A stopped attackCannotMove unit can become overlapped by a newly
+			// created static object (most commonly a corpse Feature host).  Do not
+			// let the static-response path bypass its collision lock; normal
+			// collision handling resumes as soon as the attack engagement ends.
+			if (colliderAttackLocked)
+				continue;
+
 			// building (always axis-aligned, possibly has a yardmap)
 			// or semi-static collidee that should be handled as such
 			//
@@ -3032,6 +3051,7 @@ void CGroundMoveType::HandleFeatureCollisions(
 	RECOIL_DETAILED_TRACY_ZONE;
 	const bool allowSAT = modInfo.allowSepAxisCollisionTest;
 	const bool forceSAT = (colliderParams.z > 0.1f);
+	const bool colliderAttackLocked = collider->IsAttackCollisionLocked();
 
 	const float3 crushImpulse = owner->speed * owner->mass * Sign(int(!reversing));
 	MoveTypes::CheckCollisionQuery colliderInfo(collider);
@@ -3070,6 +3090,9 @@ void CGroundMoveType::HandleFeatureCollisions(
 		}
 
 		if (!collidee->IsMoving()) {
+			if (colliderAttackLocked)
+				continue;
+
 			if (HandleStaticObjectCollision(collider, collidee, colliderMD,  colliderParams.y, collideeParams.y,  separationVect, (!atEndOfPath && !atGoal), true, false, curThread)) {
 				ReRequestPath(false);
 			}
@@ -3102,7 +3125,8 @@ void CGroundMoveType::HandleFeatureCollisions(
 		const float colliderMassScale = std::clamp(1.0f - r1, 0.01f, 0.99f);
 		const float collideeMassScale = std::clamp(1.0f - r2, 0.01f, 0.99f);
 
-		forceFromMovingCollidees += colResponseVec * colliderMassScale;
+		if (!colliderAttackLocked)
+			forceFromMovingCollidees += colResponseVec * colliderMassScale;
 
 		{
 			auto& events = Sim::registry.get<FeatureMoveEvents>(owner->entityReference);

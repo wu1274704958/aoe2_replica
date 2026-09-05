@@ -236,6 +236,12 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	// specialize defaults if non-custom sphere or footprint-box
 	collisionVolume.InitDefault(float4(model->radius, model->height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
 	selectionVolume.InitDefault(float4(model->radius, model->height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
+	if (unitDef->anchors.enabled) {
+		// CollisionVolume offsets are relative to the placeholder model's mid-position,
+		// whereas AOE anchors are relative to the sprite foot (unit pos).  Keep the
+		// physical collision centre on the same local point used for targeting.
+		collisionVolume.SetOffsets(unitDef->anchors.aimLocal - model->relMidPos);
+	}
 
 
 	mapSquare = CGround::GetSquare((params.pos).cClampInMap());
@@ -247,7 +253,7 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	Move(params.pos.cClampInMap(), false);
 
 	UpdateDirVectors(!upright && IsOnGround(), false, 0.0f);
-	SetMidAndAimPos(model->relMidPos, model->relMidPos, true);
+	SetMidAndAimPos(model->relMidPos, unitDef->anchors.enabled ? unitDef->anchors.aimLocal : model->relMidPos, true);
 	SetRadiusAndHeight(model);
 	UpdateMidAndAimPos();
 
@@ -1432,6 +1438,43 @@ bool CUnit::IsAttackMovementLocked() const
 		SupportsAttackMoveLock() &&
 		attackMotionPhase != AttackMotionPhase::Mobile
 	);
+}
+
+bool CUnit::IsAttackCollisionLocked() const
+{
+	if (
+		unitDef == nullptr ||
+		!unitDef->attackCannotMove ||
+		!SupportsAttackMoveLock()
+	) {
+		return false;
+	}
+
+	// Windup, release, recovery, and the stopping phase already lock both
+	// self-movement and collision displacement.
+	if (IsAttackMovementLocked())
+		return true;
+
+	// Between attack cycles the motion phase returns to Mobile. Keep a stopped
+	// unit stable while the first weapon, its owning Unit, or CommandAI retains
+	// the attack engagement. The Unit target bridges short HoldIfTargetInvalid
+	// gaps, while inCommand bridges the deterministic target-death handoff before
+	// an internal CMD_ATTACK is removed and its return-Fight resumes. This
+	// predicate only suppresses external collision displacement; it does not block
+	// the unit's own path movement, and naturally turns false once acceleration
+	// exceeds the attack-start threshold. AOE attack animation is intentionally
+	// driven only by the first weapon.
+	if (
+		moveType == nullptr ||
+		!IsAttackStartSpeedSatisfied() ||
+		weapons.empty()
+	) {
+		return false;
+	}
+
+	const CWeapon* weapon = weapons.front();
+	const bool attackCommandActive = (commandAI != nullptr && commandAI->inCommand == CMD_ATTACK);
+	return (attackCommandActive || HaveTarget() || (weapon != nullptr && weapon->HaveTarget()));
 }
 
 bool CUnit::IsAttackAnimationActive() const

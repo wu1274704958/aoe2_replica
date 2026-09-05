@@ -107,6 +107,11 @@ CR_REG_METADATA(CWeapon, (
 	CR_MEMBER(errorVector),
 	CR_MEMBER(errorVectorAdd),
 
+#if AOE_DEV_TOOL
+	CR_MEMBER(aoe2MuzzleOverride),
+	CR_MEMBER(aoe2MuzzleOverrideEnabled),
+#endif
+
 	CR_MEMBER(currentTarget),
 	CR_MEMBER(currentTargetPos),
 
@@ -194,6 +199,11 @@ CWeapon::CWeapon(CUnit* owner, const WeaponDef* def):
 	errorVector(ZeroVector),
 	errorVectorAdd(ZeroVector),
 
+#if AOE_DEV_TOOL
+	aoe2MuzzleOverride(ZeroVector),
+	aoe2MuzzleOverrideEnabled(false),
+#endif
+
 	muzzleFlareSize(1),
 
 	weaponAimAdjustPriority(1.f),
@@ -240,6 +250,14 @@ void CWeapon::UpdateWeaponPieces(const bool updateAimFrom)
 	hasBlockShot = owner->script->HasBlockShot(weaponNum);
 	hasTargetWeight = owner->script->HasTargetWeight(weaponNum);
 
+	if (weaponNum < owner->unitDef->anchors.weapons.size() && owner->unitDef->anchors.weapons[weaponNum].enabled) {
+		// Sprite units provide stable local anchors rather than proxy-model
+		// pieces.  Do not call QueryWeapon/AimFromWeapon for this weapon.
+		aimFromPiece = -1;
+		muzzlePiece = -1;
+		return;
+	}
+
 	muzzlePiece = owner->script->QueryWeapon(weaponNum);
 
 	if (updateAimFrom)
@@ -284,6 +302,22 @@ void CWeapon::UpdateWeaponErrorVector()
 void CWeapon::UpdateWeaponVectors()
 {
 	ZoneScoped;
+	if (weaponNum < owner->unitDef->anchors.weapons.size()) {
+		const auto& anchor = owner->unitDef->anchors.weapons[weaponNum];
+		if (anchor.enabled) {
+			const float3* muzzleLocal = &anchor.muzzleLocal;
+#if AOE_DEV_TOOL
+			if (aoe2MuzzleOverrideEnabled)
+				muzzleLocal = &aoe2MuzzleOverride;
+#endif
+			relAimFromPos = *muzzleLocal;
+			relWeaponMuzzlePos = *muzzleLocal;
+			aimFromPos = owner->GetObjectSpacePos(relAimFromPos);
+			weaponMuzzlePos = owner->GetObjectSpacePos(relWeaponMuzzlePos);
+			weaponDir = owner->GetObjectSpaceVec(anchor.forwardLocal).SafeNormalize();
+			return;
+		}
+	}
 
 	relAimFromPos = owner->script->GetPiecePos(aimFromPiece);
 	owner->script->GetEmitDirPos(muzzlePiece, relWeaponMuzzlePos, weaponDir);
