@@ -271,8 +271,9 @@ void UniformConstants::UpdateParamsImpl(UniformParamsBuffer* updateBuffer)
 		const float rawRange = camPlayer->GetFarPlaneDist() * 1.4f;
 		const float badRange = rawRange - 300.0f;
 
-		const float3 camPos = camPlayer->GetPos();
-		const float3 pxlDir = camPlayer->CalcPixelDir(wx, wy);
+		const CCamera::PixelRay pixelRay = camPlayer->CalcPixelRay(wx, wy);
+		const float3& camPos = pixelRay.origin;
+		const float3& pxlDir = pixelRay.direction;
 
 		// trace for player's allyteam
 		const float traceDist = TraceRay::GuiTraceRay(camPos, pxlDir, rawRange, nullptr, unit, feature, true, false, true);

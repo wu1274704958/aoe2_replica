@@ -1162,8 +1162,9 @@ bool CGuiHandler::TryTarget(const SCommandDescription& cmdDesc) const
 	const CFeature* targetFeature = nullptr;
 
 	const float viewRange = camera->GetFarPlaneDist() * 1.4f;
-	const float dist = TraceRay::GuiTraceRay(camera->GetPos(), mouse->dir, viewRange, NULL, targetUnit, targetFeature, true);
-	const float3 groundPos = camera->GetPos() + mouse->dir * dist;
+	const float3& rayOrigin = mouse->GetCursorCameraPos();
+	const float dist = TraceRay::GuiTraceRay(rayOrigin, mouse->dir, viewRange, NULL, targetUnit, targetFeature, true);
+	const float3 groundPos = rayOrigin + mouse->dir * dist;
 
 	if (dist <= 0.0f)
 		return false;
@@ -3568,7 +3569,7 @@ void CGuiHandler::DrawMapStuff(bool onMiniMap)
 			DrawMiniMapMarker(tracePos);
 		}
 	} else {
-		tracePos = camera->GetPos();
+		tracePos = mouse->GetCursorCameraPos();
 		traceDir = mouse->dir;
 	}
 
@@ -4432,4 +4433,3 @@ void CGuiHandler::DrawSelectCircle(const float3& pos, float radius,
 
 	glEnable(GL_FOG);
 }
-

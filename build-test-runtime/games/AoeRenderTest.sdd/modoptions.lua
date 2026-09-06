@@ -1,7 +1,13 @@
 return {
 	aoe_fixed_test_camera = {
 		name = "AOE fixed test camera",
-		desc = "Use the shared 5-degree telephoto camera in AOE gameplay test scenes",
+		desc = "Use the shared fixed camera in AOE gameplay test scenes",
+		type = "bool",
+		def = false,
+	},
+	aoe_orthographic_test_camera = {
+		name = "AOE orthographic test camera",
+		desc = "Use a true orthographic projection with the shared fixed AOE test camera",
 		type = "bool",
 		def = false,
 	},

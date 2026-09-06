@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cassert>
 
 #include "System/AABB.hpp"
 #include "System/float3.h"
@@ -110,6 +112,11 @@ public:
 		bool updateViewRange;
 	};
 
+	struct PixelRay {
+		float3 origin;
+		float3 direction;
+	};
+
 public:
 	CCamera(uint32_t cameraType = CAMTYPE_PLAYER, uint32_t projectionType = PROJTYPE_PERSP);
 
@@ -139,6 +146,7 @@ public:
 	void SetRotZ(const float z) { SetRot(float3(rot.x, rot.y,     z)); }
 
 	float3 CalcPixelDir(int x, int y) const;
+	PixelRay CalcPixelRay(int x, int y) const;
 	float3 CalcViewPortCoordinates(const float3& objPos) const;
 
 	bool InView(const float3& point, float radius = 0.0f) const;
@@ -202,6 +210,8 @@ public:
 	float GetNearPlaneDist() const { return frustum.scales.z; }
 	float GetFarPlaneDist() const { return frustum.scales.w; }
 	float GetAspectRatio() const { return aspectRatio; }
+	float GetOrthoViewHeight() const { return orthoViewHeight; }
+	void SetOrthoViewHeight(float height) { orthoViewHeight = std::max(height, 1.0f); }
 
 	float3 GetMoveVectorFromState(bool fromKeyState) const;
 
@@ -234,7 +244,7 @@ public:
 	uint32_t GetCamType() const { return camType; }
 	uint32_t GetProjType() const { return projType; }
 	void SetCamType(uint32_t ct);
-	void SetProjType(uint32_t pt) { projType = pt; }
+	void SetProjType(uint32_t pt) { assert(pt < PROJTYPE_COUNT); projType = pt; }
 	void InitConfigNotify();
 	void RemoveConfigNotify();
 
@@ -269,6 +279,7 @@ public:
 	float tanHalfFov  = 0.0f;  ///< math::tan(halfFov)
 	float lppScale    = 0.0f;  ///< length-per-pixel scale
 	float aspectRatio = 1.0f;  ///< horizontal
+	float orthoViewHeight = 1000.0f; ///< full vertical world-space span for orthographic player cameras
 
 	int viewport[4];
 

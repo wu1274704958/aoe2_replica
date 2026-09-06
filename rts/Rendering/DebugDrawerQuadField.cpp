@@ -110,7 +110,7 @@ void DebugDrawerQuadField::DrawSelectionQuads() const
 void DebugDrawerQuadField::DrawMouseRayQuads() const
 {
 	// Replicating GuiTraceRay ray setup and query so we can draw the same
-	const float3 start = camera->GetPos();
+	const float3 start = mouse->GetCursorCameraPos();
 	const float3 dir = mouse->dir;
 	const float length = camera->GetFarPlaneDist() * 1.4f;
 
@@ -154,6 +154,7 @@ void DebugDrawerQuadField::DrawCamera() const
 {
 	// draw some camera information we can use to find a better ray start.
 	const float3 start = camera->GetPos();
+	const float3 rayStart = mouse->GetCursorCameraPos();
 	const float3 dir = mouse->dir;
 	const float length = camera->GetFarPlaneDist() * 1.4f;
 
@@ -174,8 +175,7 @@ void DebugDrawerQuadField::DrawCamera() const
 	// note: seems to be the same as camPos
 	float3 intersection;
 	float4 nearPlane = camera->GetFrustumPlane(CCamera::FRUSTUM_PLANE_NEA);
-	bool res = RayAndPlaneIntersection(start, start + dir * length, nearPlane, false, intersection);
+	bool res = RayAndPlaneIntersection(rayStart, rayStart + dir * length, nearPlane, false, intersection);
 	if (res)
 		DrawRect(intersection, w*0.9, w*0.9, frustColor);
 }
-

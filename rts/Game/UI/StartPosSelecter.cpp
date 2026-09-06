@@ -103,14 +103,15 @@ bool CStartPosSelecter::MousePress(int x, int y, int button)
 	if ((showReadyBox && InBox(mx, my, readyBox)) || !gs->PreSimFrame())
 		return (!Ready(false));
 
-	const float dist = CGround::LineGroundCol(camera->GetPos(), camera->GetPos() + mouse->dir * camera->GetFarPlaneDist() * 1.4f, false);
+	const float3& rayOrigin = mouse->GetCursorCameraPos();
+	const float dist = CGround::LineGroundCol(rayOrigin, rayOrigin + mouse->dir * camera->GetFarPlaneDist() * 1.4f, false);
 
 	if (dist < 0.0f)
 		return true;
 
 	inMapDrawer->SendErase(setStartPos);
 	startPosSet = true;
-	setStartPos = camera->GetPos() + mouse->dir * dist;
+	setStartPos = rayOrigin + mouse->dir * dist;
 	clientNet->Send(CBaseNetProtocol::Get().SendStartPos(gu->myPlayerNum, gu->myTeam, CPlayer::PLAYER_RDYSTATE_UPDATED, setStartPos.x, setStartPos.y, setStartPos.z));
 
 	return true;
@@ -176,4 +177,3 @@ void CStartPosSelecter::Draw()
 		font->DrawBuffered();
 	}
 }
-

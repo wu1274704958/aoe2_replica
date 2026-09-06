@@ -339,9 +339,10 @@ void CSelectionKeyHandler::DoSelection(std::string selectString)
 			ReadDelimiter(selectString);
 
 			const float maxDist = Square(atof(ReadToken(selectString).c_str()));
-			const float gndDist = CGround::LineGroundCol(camera->GetPos(), camera->GetPos() + mouse->dir * camera->GetFarPlaneDist(), false);
+			const float3& rayOrigin = mouse->GetCursorCameraPos();
+			const float gndDist = CGround::LineGroundCol(rayOrigin, rayOrigin + mouse->dir * camera->GetFarPlaneDist(), false);
 
-			float3 mp = camera->GetPos() + mouse->dir * gndDist;
+			float3 mp = rayOrigin + mouse->dir * gndDist;
 
 			if (cylindrical)
 				mp.y = 0.0f;
@@ -519,8 +520,9 @@ void CSelectionKeyHandler::DoSelection(std::string selectString)
 			if (selection.empty())
 				return;
 
-			const float groundDist = CGround::LineGroundCol(camera->GetPos(), camera->GetPos() + mouse->dir * camera->GetFarPlaneDist(), false);
-			float3 mousePosition = camera->GetPos() + mouse->dir * groundDist;
+			const float3& rayOrigin = mouse->GetCursorCameraPos();
+			const float groundDist = CGround::LineGroundCol(rayOrigin, rayOrigin + mouse->dir * camera->GetFarPlaneDist(), false);
+			float3 mousePosition = rayOrigin + mouse->dir * groundDist;
 
 			CUnit* closest = nullptr;
 			float closestDistance = 0;
@@ -588,4 +590,3 @@ void CSelectionKeyHandler::DoSelection(std::string selectString)
 		} break;
 	}
 }
-

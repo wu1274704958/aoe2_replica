@@ -91,12 +91,16 @@ pwsh -File .\tools\windows-engine-build.ps1 -Incremental
   "$PWD\build-test-runtime\_script.txt"
 ```
 
-`_script.txt` 默认设置 `aoe_fixed_test_camera=1`，双队 Gameplay 测试因此会与锚点校准
-场景共用 5° 长焦相机、45° 俯角和基于参考画面范围换算的相机高度。将该选项
-设为 `0` 可恢复引擎默认相机。启用时还会按相机高度和地图尺寸为
+`_script.txt` 默认同时设置 `aoe_fixed_test_camera=1` 和
+`aoe_orthographic_test_camera=1`。双队 Gameplay 测试使用真实正交投影、45° 俯角，
+并通过 `orthoHeight` 保持原长焦测试相机的画面范围。将正交选项设为 `0` 可回到
+5° 透视长焦用于 A/B 对比；将固定相机选项设为 `0` 可恢复引擎默认相机。启用时还会按相机高度和地图尺寸为
 `FeatureDrawDistance`、`FeatureFadeDistance` 设置仅当前运行有效的内存覆盖，确保
-AOE 尸体 Feature 的 `DeathA` 和程序化 `Decay` 在长焦视角下可见；该覆盖不会写入
+AOE 尸体 Feature 的 `DeathA` 和程序化 `Decay` 可见；该覆盖不会写入
 `springsettings.cfg`。
+
+正交相机的 CameraState 字段、Lua 像素射线接口和交互注意事项参见
+`doc/orthographic-camera.md`。
 
 若提示缺少 `SDL2.dll`、`OpenAL32.dll` 等文件，应检查
 `build-official-release/extract` 是否包含官方 Release 的运行时 DLL。构建脚本只替换

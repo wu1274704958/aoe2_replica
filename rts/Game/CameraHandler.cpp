@@ -706,6 +706,8 @@ void CCameraHandler::GetState(CCameraController::StateMap& sm) const
 	RECOIL_DETAILED_TRACY_ZONE;
 	sm.clear();
 	sm["mode"] = currCamCtrlNum;
+	sm["projection"] = camera->GetProjType();
+	sm["orthoHeight"] = camera->GetOrthoViewHeight();
 
 	camControllers[currCamCtrlNum]->GetState(sm);
 }
@@ -721,6 +723,26 @@ CCameraController::StateMap CCameraHandler::GetState() const
 bool CCameraHandler::SetState(const CCameraController::StateMap& sm)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	const auto projectionIt = sm.find("projection");
+	if (projectionIt != sm.cend()) {
+		if (!std::isfinite(projectionIt->second))
+			return false;
+		const int projection = static_cast<int>(projectionIt->second);
+		if (projectionIt->second != projection || projection < CCamera::PROJTYPE_PERSP || projection >= CCamera::PROJTYPE_COUNT)
+			return false;
+	}
+
+	const auto orthoHeightIt = sm.find("orthoHeight");
+	if (orthoHeightIt != sm.cend()) {
+		if (!std::isfinite(orthoHeightIt->second) || orthoHeightIt->second <= 0.0f)
+			return false;
+	}
+
+	if (projectionIt != sm.cend())
+		camera->SetProjType(static_cast<int>(projectionIt->second));
+	if (orthoHeightIt != sm.cend())
+		camera->SetOrthoViewHeight(orthoHeightIt->second);
+
 	const auto it = sm.find("mode");
 
 	if (it != sm.cend()) {
@@ -833,6 +855,5 @@ bool CCameraHandler::LoadViewData(const ViewData& vd)
 		}
 	}
 
-	return camControllers[currCamCtrlNum]->SetState(vd);
+	return SetState(vd);
 }
-

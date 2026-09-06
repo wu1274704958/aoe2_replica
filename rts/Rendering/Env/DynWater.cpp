@@ -440,7 +440,8 @@ void CDynWater::Update()
 	glDisable(GL_ALPHA_TEST);
 
 	/* if(mouse->buttons[0].pressed) {
-		float3 pos = camera->GetPos() + mouse->dir * (-camera->GetPos().y / mouse->dir.y);
+		const float3& rayOrigin = mouse->GetCursorCameraPos();
+		float3 pos = rayOrigin + mouse->dir * (-rayOrigin.y / mouse->dir.y);
 		AddSplash(pos, 20, 1);
 	}*/
 	AddShipWakes();

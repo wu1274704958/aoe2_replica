@@ -64,7 +64,8 @@ float3 COverviewController::SwitchFrom() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const float3 mdir = mouse->dir;
-	const float3 rpos = pos + mdir * CGround::LineGroundCol(pos, pos + mdir * 50000.0f, false);
+	const float3& rayOrigin = mouse->GetCursorCameraPos();
+	const float3 rpos = rayOrigin + mdir * CGround::LineGroundCol(rayOrigin, rayOrigin + mdir * 50000.0f, false);
 
 	if (!globalRendering->dualScreenMode)
 		minimap->SetMinimized(minimizeMinimap);

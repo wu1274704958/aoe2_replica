@@ -186,6 +186,7 @@ build-test-runtime/games/AoeRenderTest.sdd/scripts/*
 !build-test-runtime/games/AoeRenderTest.sdd/scripts/aoe_camel_scout.lua
 !build-test-runtime/games/AoeRenderTest.sdd/LuaRules/
 build-test-runtime/games/AoeRenderTest.sdd/LuaRules/*
+!build-test-runtime/games/AoeRenderTest.sdd/LuaRules/aoe_fixed_test_camera.lua
 !build-test-runtime/games/AoeRenderTest.sdd/LuaRules/Gadgets/
 build-test-runtime/games/AoeRenderTest.sdd/LuaRules/Gadgets/*
 !build-test-runtime/games/AoeRenderTest.sdd/LuaRules/Gadgets/game_aoe_anchor_calibration.lua

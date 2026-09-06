@@ -3609,7 +3609,7 @@ public:
 			if (ir == minimap) {
 				givePos = minimap->GetMapPosition(mouse->lastx, mouse->lasty);
 			} else {
-				const float3& pos = camera->GetPos();
+				const float3& pos = mouse->GetCursorCameraPos();
 				const float3& dir = mouse->dir;
 				const float dist = CGround::LineGroundCol(pos, pos + (dir * 30000.0f));
 				givePos = pos + (dir * dist);

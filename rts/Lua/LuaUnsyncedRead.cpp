@@ -214,6 +214,7 @@ bool LuaUnsyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(WorldToScreenCoords);
 	REGISTER_LUA_CFUNC(TraceScreenRay);
 	REGISTER_LUA_CFUNC(GetPixelDir);
+	REGISTER_LUA_CFUNC(GetPixelRay);
 
 	REGISTER_LUA_CFUNC(GetTimer);
 	REGISTER_LUA_CFUNC(GetTimerMicros);
@@ -3155,8 +3156,9 @@ int LuaUnsyncedRead::TraceScreenRay(lua_State* L)
 	const float rawRange = camera->GetFarPlaneDist() * 1.4f;
 	const float badRange = rawRange - 300.0f;
 
-	const float3 camPos = camera->GetPos();
-	const float3 pxlDir = camera->CalcPixelDir(wx, wy);
+	const CCamera::PixelRay pixelRay = camera->CalcPixelRay(wx, wy);
+	const float3& camPos = pixelRay.origin;
+	const float3& pxlDir = pixelRay.direction;
 
 	// trace for player's allyteam
 	const float traceDist = TraceRay::GuiTraceRay(camPos, pxlDir, rawRange, nullptr, unit, feature, true, onlyCoords, ignoreWater);
@@ -3219,6 +3221,36 @@ int LuaUnsyncedRead::GetPixelDir(lua_State* L)
 	lua_pushnumber(L, dir.y);
 	lua_pushnumber(L, dir.z);
 	return 3;
+}
+
+
+/*** Get the world-space ray corresponding to a screen pixel.
+ *
+ * Unlike `Spring.GetPixelDir`, this also returns the per-pixel origin required
+ * by orthographic cameras.
+ *
+ * @function Spring.GetPixelRay
+ * @param x number
+ * @param y number
+ * @return number originX
+ * @return number originY
+ * @return number originZ
+ * @return number dirX
+ * @return number dirY
+ * @return number dirZ
+ */
+int LuaUnsyncedRead::GetPixelRay(lua_State* L)
+{
+	const int x = luaL_checkint(L, 1);
+	const int y = luaL_checkint(L, 2);
+	const CCamera::PixelRay ray = camera->CalcPixelRay(x, y);
+	lua_pushnumber(L, ray.origin.x);
+	lua_pushnumber(L, ray.origin.y);
+	lua_pushnumber(L, ray.origin.z);
+	lua_pushnumber(L, ray.direction.x);
+	lua_pushnumber(L, ray.direction.y);
+	lua_pushnumber(L, ray.direction.z);
+	return 6;
 }
 
 
@@ -3785,9 +3817,9 @@ int LuaUnsyncedRead::GetMouseCursor(lua_State* L)
  * @param button number
  * @return number x
  * @return number y
- * @return number camPosX
- * @return number camPosY
- * @return number camPosZ
+ * @return number rayOriginX
+ * @return number rayOriginY
+ * @return number rayOriginZ
  * @return number dirX
  * @return number dirY
  * @return number dirZ

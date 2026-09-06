@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "Game/Camera.h"
 #include "Rendering/GL/RenderBuffersFwd.h"
 #include "System/float3.h"
 #include "System/type2.h"
@@ -73,6 +74,8 @@ public:
 	}
 
 	float3 GetCursorCameraDir(int x, int y) const;
+	CCamera::PixelRay GetCursorCameraRay(int x, int y) const;
+	const float3& GetCursorCameraPos() const { return origin; }
 	float3 GetWorldMapPos() const;
 
 	std::string GetCurrentTooltip() const;
@@ -105,6 +108,16 @@ private:
 		float2& topright,
 		float2& bttmleft
 	);
+	void GetSelectionBoxPlanes(
+		const float3& origin1,
+		const float3& dir1,
+		const float3& origin2,
+		const float3& dir2,
+		float4& planeRight,
+		float4& planeLeft,
+		float4& planeTop,
+		float4& planeBottom
+	) const;
 
 public:
 	int lastx = -1;
@@ -164,6 +177,7 @@ public:
 	};
 
 	ButtonPressEvt buttons[NUM_BUTTONS + 1]; /// One-bottomed.
+	float3 origin;
 	float3 dir;
 
 private:

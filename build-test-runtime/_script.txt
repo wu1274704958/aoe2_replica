@@ -20,6 +20,7 @@ luagaia=0;
 luarules=1;
 aoe_attack_cannot_move=1;
 aoe_team_spacing=42;
+aoe_orthographic_test_camera=1;
 aoe_global_los=1;
 aoe_fixed_test_camera=1;
 aoe_explicit_move_regression=0;

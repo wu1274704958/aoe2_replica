@@ -121,6 +121,7 @@ void COverheadController::MouseWheelMove(float move, const float3& newDir)
 		return;
 
 	camHandler->CameraTransition(0.05f);
+	const float previousHeight = height;
 
 	const bool moveFast     = camHandler->GetActiveCamera()->GetMovState()[CCamera::MOVE_STATE_FST];
 	const bool moveTilt     = camHandler->GetActiveCamera()->GetMovState()[CCamera::MOVE_STATE_TLT];
@@ -197,6 +198,8 @@ void COverheadController::MouseWheelMove(float move, const float3& newDir)
 	}
 
 	Update();
+	if (camera->GetProjType() == CCamera::PROJTYPE_ORTHO && previousHeight > 0.0f)
+		camera->SetOrthoViewHeight(camera->GetOrthoViewHeight() * height / previousHeight);
 }
 
 void COverheadController::Update()
@@ -210,7 +213,9 @@ void COverheadController::Update()
 	angle = std::clamp(angle, 0.01f, math::HALFPI);
 
 	dir = float3(0.0f, -fastmath::cos(angle), flipped ? fastmath::sin(angle) : -fastmath::sin(angle));
-	pixelSize = (camera->GetTanHalfFov() * 2.0f) / globalRendering->viewSizeY * height * 2.0f;
+	pixelSize = (camera->GetProjType() == CCamera::PROJTYPE_ORTHO)
+		? camera->GetOrthoViewHeight() / globalRendering->viewSizeY
+		: (camera->GetTanHalfFov() * 2.0f) / globalRendering->viewSizeY * height * 2.0f;
 }
 
 

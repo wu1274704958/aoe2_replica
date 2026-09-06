@@ -328,8 +328,9 @@ void CMouseHandler::MousePress(int x, int y, int button)
 	bp.time     = gu->gameTime;
 	bp.x        = x;
 	bp.y        = y;
-	bp.camPos   = camera->GetPos();
-	bp.dir      = (dir = GetCursorCameraDir(x, y));
+	const CCamera::PixelRay ray = GetCursorCameraRay(x, y);
+	bp.camPos   = (origin = ray.origin);
+	bp.dir      = (dir = ray.direction);
 	bp.movement = 0;
 
 	pressedBitMask |= 1 << button;
@@ -415,6 +416,24 @@ bool CMouseHandler::GetSelectionBoxVertices(float3& bl, float3& br, float3& tl, 
 
 	// do not let the rectangle verts be clipped
 	const float dirScale = camera->GetNearPlaneDist() * 2.0f;
+	if (camera->GetProjType() == CCamera::PROJTYPE_ORTHO) {
+		const float x1 = bp.camPos.dot(camera->GetRight());
+		const float x2 = origin.dot(camera->GetRight());
+		const float y1 = bp.camPos.dot(camera->GetUp());
+		const float y2 = origin.dot(camera->GetUp());
+		const float xmin = std::min(x1, x2);
+		const float xmax = std::max(x1, x2);
+		const float ymin = std::min(y1, y2);
+		const float ymax = std::max(y1, y2);
+		const float3 base = camera->GetPos() + camera->GetForward() * dirScale;
+		const float3 xBase = base - camera->GetRight() * base.dot(camera->GetRight());
+		const float3 xyBase = xBase - camera->GetUp() * xBase.dot(camera->GetUp());
+		bl = xyBase + camera->GetRight() * xmin + camera->GetUp() * ymin;
+		br = xyBase + camera->GetRight() * xmax + camera->GetUp() * ymin;
+		tl = xyBase + camera->GetRight() * xmin + camera->GetUp() * ymax;
+		tr = xyBase + camera->GetRight() * xmax + camera->GetUp() * ymax;
+		return true;
+	}
 
 	const float3 xmin   = camera->GetRight() * bttmLeft.x;
 	const float3 xmax   = camera->GetRight() * topRight.x;
@@ -476,6 +495,51 @@ void CMouseHandler::GetSelectionBoxCoeff(
 	if (topright.y < bttmleft.y) std::swap(topright.y, bttmleft.y);
 }
 
+void CMouseHandler::GetSelectionBoxPlanes(
+	const float3& origin1,
+	const float3& dir1,
+	const float3& origin2,
+	const float3& dir2,
+	float4& planeRight,
+	float4& planeLeft,
+	float4& planeTop,
+	float4& planeBottom
+) const {
+	if (camera->GetProjType() == CCamera::PROJTYPE_ORTHO) {
+		const float x1 = origin1.dot(camera->GetRight());
+		const float x2 = origin2.dot(camera->GetRight());
+		const float y1 = origin1.dot(camera->GetUp());
+		const float y2 = origin2.dot(camera->GetUp());
+		const float xmin = std::min(x1, x2);
+		const float xmax = std::max(x1, x2);
+		const float ymin = std::min(y1, y2);
+		const float ymax = std::max(y1, y2);
+		planeRight = float4( camera->GetRight(), -xmax);
+		planeLeft = float4(-camera->GetRight(),  xmin);
+		planeTop = float4( camera->GetUp(), -ymax);
+		planeBottom = float4(-camera->GetUp(),  ymin);
+		return;
+	}
+
+	float2 topRight;
+	float2 bttmLeft;
+	GetSelectionBoxCoeff(origin1, dir1, origin2, dir2, topRight, bttmLeft);
+
+	float3 norm1 =  camera->GetUp();
+	float3 norm2 = -camera->GetUp();
+	float3 norm3 =  camera->GetRight();
+	float3 norm4 = -camera->GetRight();
+	const auto signf = [](float value) { return (value > 0.0f) ? 1.0f : -1.0f; };
+	if (topRight.y != 0.0f) norm1 = (camera->GetDir() * signf(-topRight.y)) + (camera->GetUp()    / math::fabs(topRight.y));
+	if (bttmLeft.y != 0.0f) norm2 = (camera->GetDir() * signf( bttmLeft.y)) - (camera->GetUp()    / math::fabs(bttmLeft.y));
+	if (topRight.x != 0.0f) norm3 = (camera->GetDir() * signf(-topRight.x)) + (camera->GetRight() / math::fabs(topRight.x));
+	if (bttmLeft.x != 0.0f) norm4 = (camera->GetDir() * signf( bttmLeft.x)) - (camera->GetRight() / math::fabs(bttmLeft.x));
+	planeRight = float4(norm1, -(norm1.dot(camera->GetPos())));
+	planeLeft = float4(norm2, -(norm2.dot(camera->GetPos())));
+	planeTop = float4(norm3, -(norm3.dot(camera->GetPos())));
+	planeBottom = float4(norm4, -(norm4.dot(camera->GetPos())));
+}
+
 
 void CMouseHandler::MouseRelease(int x, int y, int button)
 {
@@ -489,7 +553,9 @@ void CMouseHandler::MouseRelease(int x, int y, int button)
 	// Origin for mousecursor on internal coordinates is lower border of view screen
 	y = y - globalRendering->viewWindowOffsetY;
 
-	dir = GetCursorCameraDir(x, y);
+	const CCamera::PixelRay ray = GetCursorCameraRay(x, y);
+	origin = ray.origin;
+	dir = ray.direction;
 
 	buttons[button].pressed = false;
 	pressedBitMask &= ~(1 << button);
@@ -541,35 +607,18 @@ void CMouseHandler::MouseRelease(int x, int y, int button)
 
 		if (bp.movement > dragSelectionThreshold && selectedUnitsHandler.GetBoxSelectionHandledByEngine()) {
 			// select box
-			float2 topright;
-			float2 bttmleft;
-
-			GetSelectionBoxCoeff(bp.camPos, bp.dir, camera->GetPos(), dir, topright, bttmleft);
-
-			// GetSelectionBoxCoeff returns us the corner pos, but we want to do a inview frustum check.
-			// To do so we need the frustum planes (= plane normal + plane offset).
-			float3 norm1 =  camera->GetUp();
-			float3 norm2 = -camera->GetUp();
-			float3 norm3 =  camera->GetRight();
-			float3 norm4 = -camera->GetRight();
-
-			#define signf(x) ((x > 0.0f) ? 1.0f : -1.0f)
-			if (topright.y != 0.0f) norm1 = (camera->GetDir() * signf(-topright.y)) + (camera->GetUp()    / math::fabs(topright.y));
-			if (bttmleft.y != 0.0f) norm2 = (camera->GetDir() * signf( bttmleft.y)) - (camera->GetUp()    / math::fabs(bttmleft.y));
-			if (topright.x != 0.0f) norm3 = (camera->GetDir() * signf(-topright.x)) + (camera->GetRight() / math::fabs(topright.x));
-			if (bttmleft.x != 0.0f) norm4 = (camera->GetDir() * signf( bttmleft.x)) - (camera->GetRight() / math::fabs(bttmleft.x));
-
-			const float4 plane1(norm1, -(norm1.dot(camera->GetPos())));
-			const float4 plane2(norm2, -(norm2.dot(camera->GetPos())));
-			const float4 plane3(norm3, -(norm3.dot(camera->GetPos())));
-			const float4 plane4(norm4, -(norm4.dot(camera->GetPos())));
+			float4 plane1;
+			float4 plane2;
+			float4 plane3;
+			float4 plane4;
+			GetSelectionBoxPlanes(bp.camPos, bp.dir, origin, dir, plane1, plane2, plane3, plane4);
 
 			selectedUnitsHandler.HandleUnitBoxSelection(plane1, plane2, plane3, plane4);
 		} else {
 			const CUnit* unit = nullptr;
 			const CFeature* feature = nullptr;
 
-			TraceRay::GuiTraceRay(camera->GetPos(), dir, camera->GetFarPlaneDist() * 1.4f, nullptr, unit, feature, false);
+			TraceRay::GuiTraceRay(origin, dir, camera->GetFarPlaneDist() * 1.4f, nullptr, unit, feature, false);
 			lastClicked = unit;
 
 			const bool selectType = (bp.lastRelease >= (gu->gameTime - doubleClickTime) && unit == _lastClicked);
@@ -644,18 +693,22 @@ int2 CMouseHandler::GetViewMouseCenter() const
 	};
 }
 
-float3 CMouseHandler::GetCursorCameraDir(int x, int y) const { return (hideCursor? camera->GetDir() : camera->CalcPixelDir(x, y)); }
+CCamera::PixelRay CMouseHandler::GetCursorCameraRay(int x, int y) const
+{
+	return hideCursor ? CCamera::PixelRay{camera->GetPos(), camera->GetDir()} : camera->CalcPixelRay(x, y);
+}
+
+float3 CMouseHandler::GetCursorCameraDir(int x, int y) const { return GetCursorCameraRay(x, y).direction; }
 float3 CMouseHandler::GetWorldMapPos() const
 {
-	const float3 cameraPos = camera->GetPos();
 	const float3 cursorVec = dir * camera->GetFarPlaneDist() * 1.4f;
 
-	const float dist = CGround::LineGroundCol(cameraPos, cameraPos + cursorVec, false);
+	const float dist = CGround::LineGroundCol(origin, origin + cursorVec, false);
 
 	if (dist < 0.0f)
 		return -OnesVector;
 
-	return ((cameraPos + dir * dist).cClampInBounds());
+	return ((origin + dir * dist).cClampInBounds());
 }
 
 // CALLINFO:
@@ -895,7 +948,9 @@ void CMouseHandler::UpdateCursors()
 void CMouseHandler::UpdateCursorCameraDir()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	dir = GetCursorCameraDir(lastx, lasty);
+	const CCamera::PixelRay ray = GetCursorCameraRay(lastx, lasty);
+	origin = ray.origin;
+	dir = ray.direction;
 }
 
 

@@ -43,7 +43,7 @@ public:
 		// We can not use default params for this,
 		// because they get initialized at compile-time,
 		// where camera and mouse are still undefined.
-		MouseRelease(x, y, button, camera->GetPos(), mouse->dir);
+		MouseRelease(x, y, button, mouse->GetCursorCameraPos(), mouse->dir);
 	}
 	void MouseRelease(int x, int y, int button, const float3& cameraPos, const float3& mouseDir);
 	bool IsAbove(int x, int y);
@@ -56,7 +56,7 @@ public:
 		// We can not use default params for this,
 		// because they get initialized at compile-time,
 		// where camera and mouse are still undefined.
-		return GetCommand(mouseX, mouseY, buttonHint, preview, camera->GetPos(), mouse->dir);
+		return GetCommand(mouseX, mouseY, buttonHint, preview, mouse->GetCursorCameraPos(), mouse->dir);
 	}
 	Command GetCommand(int mouseX, int mouseY, int buttonHint, bool preview, const float3& cameraPos, const float3& mouseDir);
 	/// startInfo.def has to be endInfo.def
@@ -92,7 +92,7 @@ public:
 		// We can not use default params for this,
 		// because they get initialized at compile-time,
 		// where camera and mouse are still undefined.
-		return GetDefaultCommand(x, y, camera->GetPos(), ::mouse->dir);
+		return GetDefaultCommand(x, y, ::mouse->GetCursorCameraPos(), ::mouse->dir);
 	}
 	int  GetDefaultCommand(int x, int y, const float3& cameraPos, const float3& mouseDir) const;
 
@@ -271,4 +271,3 @@ public:
 extern CGuiHandler* guihandler;
 
 #endif /* GUI_HANDLER_H */
-

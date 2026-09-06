@@ -94,6 +94,8 @@
 ---@field name CameraName The camera name.
 ---@field mode CameraMode The camera mode.
 ---@field fov number?
+---@field projection number? Projection type: `0` for perspective, `1` for orthographic.
+---@field orthoHeight number? Full vertical world-space span when using orthographic projection.
 ---@field px number? Position X of the ground point in screen center.
 ---@field py number? Position Y of the ground point in screen center.
 ---@field pz number? Position Z of the ground point in screen center.

@@ -103,7 +103,7 @@ CCamera* CCamera::GetActive()
 void CCamera::CopyState(const CCamera* cam)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	// note: xy-scales are only relevant for CAMTYPE_SHADOW
+	// Orthographic cameras also need their world-space XY projection scales.
 	frustum     = cam->frustum;
 
 	forward     = cam->GetForward();
@@ -116,6 +116,8 @@ void CCamera::CopyState(const CCamera* cam)
 	fov         = cam->GetVFOV();
 	halfFov     = cam->GetHalfFov();
 	tanHalfFov  = cam->GetTanHalfFov();
+	projType    = cam->GetProjType();
+	orthoViewHeight = cam->GetOrthoViewHeight();
 
 	lppScale    = cam->GetLPPScale();
 	aspectRatio = cam->GetAspectRatio();
@@ -134,6 +136,8 @@ void CCamera::CopyStateReflect(const CCamera* cam)
 	SetPos(cam->GetPos() * float3(1.0f, -1.0f, 1.0f));
 	SetRotZ(-cam->GetRot().z);
 	SetVFOV(cam->GetVFOV());
+	SetProjType(cam->GetProjType());
+	SetOrthoViewHeight(cam->GetOrthoViewHeight());
 
 	Update(false, true, false);
 }
@@ -141,7 +145,7 @@ void CCamera::CopyStateReflect(const CCamera* cam)
 void CCamera::Update(const UpdateParams& p)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	lppScale = (2.0f * tanHalfFov) * globalRendering->pixelY;
+	lppScale = ((projType == PROJTYPE_ORTHO) ? orthoViewHeight : (2.0f * tanHalfFov)) * globalRendering->pixelY;
 	aspectRatio = globalRendering->aspectRatio;
 
 	// should be set before UpdateMatrices
@@ -239,7 +243,11 @@ void CCamera::UpdateMatrices(uint32_t vsx, uint32_t vsy, float var)
 			gluPerspectiveSpring(var, frustum.scales.z, frustum.scales.w);
 		} break;
 		case PROJTYPE_ORTHO: {
-			glOrthoScaledSpring(vsx, vsy, frustum.scales.z, frustum.scales.w);
+			const float halfHeight = orthoViewHeight * 0.5f;
+			const float halfWidth = halfHeight * var;
+			frustum.scales.x = halfWidth;
+			frustum.scales.y = halfHeight;
+			glOrthoScaledSpring(halfWidth, halfHeight, frustum.scales.z, frustum.scales.w);
 		} break;
 		default: {
 			assert(false);
@@ -568,13 +576,28 @@ void CCamera::SetDir(const float3& dir)
 float3 CCamera::CalcPixelDir(int x, int y) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	return CalcPixelRay(x, y).direction;
+}
+
+CCamera::PixelRay CCamera::CalcPixelRay(int x, int y) const
+{
+	RECOIL_DETAILED_TRACY_ZONE;
 	const int vsx = std::max(1, globalRendering->viewSizeX);
 	const int vsy = std::max(1, globalRendering->viewSizeY);
 
-	const float dx = float(x - globalRendering->viewPosX - (vsx >> 1)) / vsy * (tanHalfFov * 2.0f);
-	const float dy = float(y -                             (vsy >> 1)) / vsy * (tanHalfFov * 2.0f);
+	const float nx = (float(x - globalRendering->viewPosX) / float(vsx) - 0.5f) * 2.0f;
+	const float ny = (float(y) / float(vsy) - 0.5f) * 2.0f;
 
-	return ((forward - up * dy + right * dx).Normalize());
+	if (projType == PROJTYPE_ORTHO) {
+		return {
+			pos + right * (nx * frustum.scales.x) - up * (ny * frustum.scales.y),
+			forward,
+		};
+	}
+
+	const float dx = nx * tanHalfFov * aspectRatio;
+	const float dy = ny * tanHalfFov;
+	return {pos, (forward - up * dy + right * dx).Normalize()};
 }
 
 

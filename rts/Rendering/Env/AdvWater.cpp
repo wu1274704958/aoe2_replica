@@ -186,52 +186,80 @@ void CAdvWater::Draw(bool useBlending)
 	va->Initialize();
 	va->EnlargeArrays(5 * numDivs * (numDivs + 1) * 2, 5 * numDivs, VA_SIZE_TC); //! alloc room for all vertices and strips
 
-	for (int a = 0; a < 5; ++a) { //! CAUTION: loop count must match EnlargeArrays above
-		bool maxReached = false;
+	if (camera->GetProjType() == CCamera::PROJTYPE_ORTHO) {
+		const CCamera::PixelRay bottomLeft = camera->CalcPixelRay(globalRendering->viewPosX, globalRendering->viewSizeY);
+		const CCamera::PixelRay bottomRight = camera->CalcPixelRay(globalRendering->viewPosX + globalRendering->viewSizeX, globalRendering->viewSizeY);
+		const CCamera::PixelRay topLeft = camera->CalcPixelRay(globalRendering->viewPosX, 0);
+		const float3 originDx = (bottomRight.origin - bottomLeft.origin) / numDivs;
+		const float3 originDy = (topLeft.origin - bottomLeft.origin) / numDivs;
+		dir = bottomLeft.direction;
+		col[3] = (unsigned char)((0.8f + 0.7f * dir.y) * 255);
+
+		const auto AddWaterVertex = [&](const float3& rayOrigin, float tx, float ty) {
+			float3 waterPos = rayOrigin + dir * (rayOrigin.y / -dir.y);
+			waterPos.y = fastmath::sin(waterPos.z * 0.1f + gs->frameNum * 0.06f) * 0.06f + 0.05f;
+			va->AddVertexQTC(waterPos, tx, ty, col);
+		};
 
 		for (int y = 0; y < numDivs; ++y) {
-			dir = base;
-			dir.ANormalize();
-
-			if (dir.y >= maxY) {
-				maxReached = true;
-				break;
-			}
-
-			xbase = base;
-
-			for (int x = 0; x < numDivs + 1; ++x) { //! CAUTION: loop count must match EnlargeArrays above
-				dir = xbase + dv;
-				dir.ANormalize();
-
-				zpos = camera->GetPos() + dir * (camera->GetPos().y / -dir.y);
-				zpos.y = fastmath::sin(zpos.z * 0.1f + gs->frameNum * 0.06f) * 0.06f + 0.05f;
-
-				col[3] = (unsigned char)((0.8f + 0.7f * dir.y) * 255);
-				va->AddVertexQTC(zpos, x * (1.0f / numDivs), screenY - yInc, col);
-
-				dir = xbase;
-				dir.ANormalize();
-
-				zpos = camera->GetPos() + dir * (camera->GetPos().y / -dir.y);
-				zpos.y = fastmath::sin(zpos.z * 0.1f + gs->frameNum * 0.06f) * 0.06f + 0.05f;
-
-				col[3] = (unsigned char)((0.8f + 0.7f * dir.y) * 255);
-				va->AddVertexQTC(zpos, x * (1.0f / numDivs), screenY, col);
-
-				xbase += dh;
+			const float3 rowOrigin = bottomLeft.origin + originDy * y;
+			for (int x = 0; x < numDivs + 1; ++x) {
+				const float tx = x * (1.0f / numDivs);
+				const float3 lowerOrigin = rowOrigin + originDx * x;
+				AddWaterVertex(lowerOrigin + originDy, tx, screenY - yInc);
+				AddWaterVertex(lowerOrigin, tx, screenY);
 			}
 			va->EndStrip();
-			base += dv;
 			screenY -= yInc;
 		}
+	} else {
+		for (int a = 0; a < 5; ++a) { //! CAUTION: loop count must match EnlargeArrays above
+			bool maxReached = false;
 
-		if (!maxReached)
-			break;
+			for (int y = 0; y < numDivs; ++y) {
+				dir = base;
+				dir.ANormalize();
 
-		dv   *= 0.5f;
-		maxY *= 0.5f;
-		yInc *= 0.5f;
+				if (dir.y >= maxY) {
+					maxReached = true;
+					break;
+				}
+
+				xbase = base;
+
+				for (int x = 0; x < numDivs + 1; ++x) { //! CAUTION: loop count must match EnlargeArrays above
+					dir = xbase + dv;
+					dir.ANormalize();
+
+					zpos = camera->GetPos() + dir * (camera->GetPos().y / -dir.y);
+					zpos.y = fastmath::sin(zpos.z * 0.1f + gs->frameNum * 0.06f) * 0.06f + 0.05f;
+
+					col[3] = (unsigned char)((0.8f + 0.7f * dir.y) * 255);
+					va->AddVertexQTC(zpos, x * (1.0f / numDivs), screenY - yInc, col);
+
+					dir = xbase;
+					dir.ANormalize();
+
+					zpos = camera->GetPos() + dir * (camera->GetPos().y / -dir.y);
+					zpos.y = fastmath::sin(zpos.z * 0.1f + gs->frameNum * 0.06f) * 0.06f + 0.05f;
+
+					col[3] = (unsigned char)((0.8f + 0.7f * dir.y) * 255);
+					va->AddVertexQTC(zpos, x * (1.0f / numDivs), screenY, col);
+
+					xbase += dh;
+				}
+				va->EndStrip();
+				base += dv;
+				screenY -= yInc;
+			}
+
+			if (!maxReached)
+				break;
+
+			dv   *= 0.5f;
+			maxY *= 0.5f;
+			yInc *= 0.5f;
+		}
 	}
 	va->DrawArrayTC(GL_TRIANGLE_STRIP);
 

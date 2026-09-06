@@ -22,10 +22,12 @@ if not gadgetHandler:IsSyncedCode() then
 		if meleeTestEnabled or not fixedCameraEnabled then
 			return
 		end
-		local cameraApplied, cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance = fixedTestCamera.Apply()
+		local cameraApplied, cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance,
+			projection, orthoHeight = fixedTestCamera.Apply()
 		Spring.Echo(string.format(
-			"[AOE Gameplay Test] fixed telephoto camera applied=%s fov=%.1f height=%.1f angle=%.1fdeg featureDraw=%.1f featureFade=%.1f",
-			tostring(cameraApplied), cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance))
+			"[AOE Gameplay Test] fixed camera applied=%s projection=%s fov=%.1f orthoHeight=%.1f height=%.1f angle=%.1fdeg featureDraw=%.1f featureFade=%.1f",
+			tostring(cameraApplied), projection, cameraFov, orthoHeight, cameraHeight, cameraAngle,
+			featureDrawDistance, featureFadeDistance))
 	end
 
 	function gadget:RecvFromSynced(eventName, ...)
