@@ -198,22 +198,17 @@ flat in uint oPlayer;
 out vec4 fragColor;
 uniform sampler2D diffuseTex;
 uniform sampler2D playerColorTex;
-vec3 playerColor(uint player) {
-	const vec3 colors[8] = vec3[8](
-		vec3(0.02, 0.12, 1.00), vec3(1.00, 0.05, 0.03),
-		vec3(0.02, 0.66, 0.12), vec3(0.84, 0.84, 0.10),
-		vec3(0.48, 0.94, 0.94), vec3(0.56, 0.08, 0.97),
-		vec3(0.40), vec3(1.00, 0.57, 0.02));
-	return colors[clamp(int(oPlayer) - 1, 0, 7)];
-}
+uniform sampler2D playerPalette;
 void main() {
 	vec4 base = texture(diffuseTex, oUv);
 	if (base.a < 0.01) discard;
-	float packedMask = texture(playerColorTex, oUv).r * 255.0;
-	if (packedMask >= 0.5) {
-		float subShade = mix(0.48, 1.18, clamp(packedMask - 1.0, 0.0, 7.0) / 7.0);
+	int encodedIndex = int(texture(playerColorTex, oUv).r * 255.0 + 0.5);
+	if (encodedIndex != 0) {
+		int player = clamp(int(oPlayer), 1, 8) - 1;
+		vec3 teamBase = texelFetch(playerPalette, ivec2(0, player), 0).rgb;
 		float diffuseLuma = dot(base.rgb, vec3(0.2126, 0.7152, 0.0722));
-		base.rgb = playerColor(oPlayer) * subShade * clamp(diffuseLuma * 1.35 + 0.18, 0.35, 1.35);
+		float shade = clamp(diffuseLuma * 1.6, 0.22, 1.15);
+		base.rgb = clamp(teamBase * shade, 0.0, 1.0);
 	}
 	fragColor = base * oColor;
 }
@@ -354,11 +349,21 @@ enum class TextureEncoding {
 	PlayerColorR8,
 };
 
-GLuint LoadTexture(const std::filesystem::path& path, bool linear, TextureEncoding encoding, std::uint64_t& textureBytes)
+GLuint LoadTexture(
+	const std::filesystem::path& path,
+	bool linear,
+	TextureEncoding encoding,
+	std::uint64_t& textureBytes,
+	int expectedWidth = 0,
+	int expectedHeight = 0
+)
 {
 	CBitmap source;
 	if (!source.Load(path.string(), 1.0f, 4, GL_UNSIGNED_BYTE, false))
 		throw std::runtime_error("failed to load texture: " + path.string());
+	if ((expectedWidth > 0 && source.xsize != expectedWidth) ||
+		(expectedHeight > 0 && source.ysize != expectedHeight))
+		throw std::runtime_error("unexpected texture dimensions: " + path.string());
 
 	CBitmap packed;
 	const CBitmap* upload = &source;
@@ -371,10 +376,10 @@ GLuint LoadTexture(const std::filesystem::path& path, bool linear, TextureEncodi
 			if (encoding == TextureEncoding::ShadowR8) {
 				packedPixels[i] = sourcePixels[i * 4];
 			} else {
-				const std::uint8_t alpha = sourcePixels[i * 4 + 3];
-				packedPixels[i] = (alpha >= 128)
-					? static_cast<std::uint8_t>(std::min<std::uint8_t>(7, sourcePixels[i * 4]) + 1)
-					: 0;
+				// Exported masks use 0 for non-team-color pixels and 1..128 for
+				// original SLD player-color indices 0..127. Preserve that compact
+				// encoding exactly; do not quantize it back to the legacy 8 shades.
+				packedPixels[i] = sourcePixels[i * 4];
 			}
 		}
 		upload = &packed;
@@ -463,6 +468,8 @@ public:
 	std::vector<Aoe2UnitInstanceDesc> destroyedTestInstances;
 	Shader::IProgramObject* mainShader = nullptr;
 	Shader::IProgramObject* shadowShader = nullptr;
+	GLuint playerColorPaletteTexture = 0;
+	std::uint64_t playerColorPaletteTextureBytes = 0;
 	GLuint quadVbo = 0;
 	GLuint quadEbo = 0;
 	std::array<GLuint, 4> gpuQueries{};
@@ -486,8 +493,10 @@ Shader::IProgramObject* Aoe2RendererImpl::CreateShader(const char* name, std::st
 	program->Link();
 	program->Enable();
 	program->SetUniform("diffuseTex", 0);
-	if (std::string_view(name) == "Main")
+	if (std::string_view(name) == "Main") {
 		program->SetUniform("playerColorTex", 1);
+		program->SetUniform("playerPalette", 2);
+	}
 	program->Disable();
 	program->Validate();
 	return program->IsValid() ? program : nullptr;
@@ -516,6 +525,15 @@ bool Aoe2RendererImpl::Init()
 	diagnosticsEnabled = configHandler->GetBool("Aoe2UnitDiagnostics");
 	if (!std::filesystem::exists(cacheRoot)) {
 		LOG_L(L_WARNING, "[Aoe2UnitRenderer] cache root does not exist: %s", cacheRoot.string().c_str());
+		return false;
+	}
+	try {
+		playerColorPaletteTexture = LoadTexture(
+			cacheRoot / "playercolor_palette.png", false, TextureEncoding::Rgba,
+			playerColorPaletteTextureBytes, 128, 8);
+		diagnostics.textureBytes += playerColorPaletteTextureBytes;
+	} catch (const std::exception& error) {
+		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to load player-color palette: %s", error.what());
 		return false;
 	}
 
@@ -564,6 +582,8 @@ void Aoe2RendererImpl::Kill()
 	if (quadEbo != 0) glDeleteBuffers(1, &quadEbo);
 	if (quadVbo != 0) glDeleteBuffers(1, &quadVbo);
 	if (gpuQueries[0] != 0) glDeleteQueries(static_cast<GLsizei>(gpuQueries.size()), gpuQueries.data());
+	if (playerColorPaletteTexture != 0) glDeleteTextures(1, &playerColorPaletteTexture);
+	playerColorPaletteTexture = 0;
 	shaderHandler->ReleaseProgramObjects("[Aoe2UnitRenderer]");
 	mainShader = nullptr;
 	shadowShader = nullptr;
@@ -654,6 +674,8 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 		const std::string kind = GetString(document["kind"]);
 		if ((schemaVersion != 2 && schemaVersion != 3) || kind != "aoe2de_unit" || GetString(document["id"]) != unitId)
 			throw std::runtime_error("unsupported unit manifest");
+		if (GetString(document["export_settings"]["player_color"]["format"]) != "r8_palette_index_plus_one")
+			throw std::runtime_error("unsupported player-color format");
 		simdjson::dom::object manifestAnimations;
 		if (const auto error = document["animations"].get_object().get(manifestAnimations); error != simdjson::SUCCESS)
 			throw std::runtime_error("manifest animations are missing or invalid: " + std::string(simdjson::error_message(error)));
@@ -1186,6 +1208,7 @@ void Aoe2RendererImpl::Draw()
 	GLint oldVao = 0;
 	GLint oldTexture0 = 0;
 	GLint oldTexture1 = 0;
+	GLint oldTexture2 = 0;
 	glGetBooleanv(GL_DEPTH_WRITEMASK, &oldDepthMask);
 	glGetIntegerv(GL_DEPTH_FUNC, &oldDepthFunc);
 	glGetIntegerv(GL_BLEND_SRC_RGB, &oldBlendSrc);
@@ -1201,6 +1224,10 @@ void Aoe2RendererImpl::Draw()
 	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture0);
 	glActiveTexture(GL_TEXTURE1);
 	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture1);
+	glActiveTexture(GL_TEXTURE2);
+	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture2);
+	glBindTexture(GL_TEXTURE_2D, playerColorPaletteTexture);
+	glActiveTexture(GL_TEXTURE0);
 
 	glEnable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
@@ -1213,6 +1240,7 @@ void Aoe2RendererImpl::Draw()
 		for (auto& animation : appearancePtr->animations)
 			DrawBatch(animation, animation.shadowBatch, true);
 	}
+
 	glDepthMask(GL_TRUE);
 	for (auto& appearancePtr : appearances) {
 		if (appearancePtr == nullptr) continue;
@@ -1220,6 +1248,8 @@ void Aoe2RendererImpl::Draw()
 			DrawBatch(animation, animation.mainBatch, false);
 	}
 
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, oldTexture2);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, oldTexture1);
 	glActiveTexture(GL_TEXTURE0);
