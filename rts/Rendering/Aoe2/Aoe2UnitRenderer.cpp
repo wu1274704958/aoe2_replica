@@ -198,17 +198,27 @@ flat in uint oPlayer;
 out vec4 fragColor;
 uniform sampler2D diffuseTex;
 uniform sampler2D playerColorTex;
-uniform sampler2D playerPalette;
+const vec3 teamColors[8] = vec3[8](
+	vec3(0.000, 0.000, 1.000),
+	vec3(1.000, 0.000, 0.000),
+	vec3(0.000, 0.663, 0.106),
+	vec3(0.839, 0.839, 0.106),
+	vec3(0.482, 0.937, 0.941),
+	vec3(0.541, 0.075, 0.969),
+	vec3(0.400, 0.400, 0.400),
+	vec3(1.000, 0.573, 0.020)
+);
 void main() {
 	vec4 base = texture(diffuseTex, oUv);
 	if (base.a < 0.01) discard;
-	int encodedIndex = int(texture(playerColorTex, oUv).r * 255.0 + 0.5);
-	if (encodedIndex != 0) {
+	float teamWeight = texture(playerColorTex, oUv).r;
+	if (teamWeight > 0.0) {
 		int player = clamp(int(oPlayer), 1, 8) - 1;
-		vec3 teamBase = texelFetch(playerPalette, ivec2(0, player), 0).rgb;
-		float diffuseLuma = dot(base.rgb, vec3(0.2126, 0.7152, 0.0722));
+		vec3 teamBase = teamColors[player];
+		float diffuseLuma = dot(base.rgb, vec3(0.299, 0.587, 0.114));
 		float shade = clamp(diffuseLuma * 1.6, 0.22, 1.15);
-		base.rgb = clamp(teamBase * shade, 0.0, 1.0);
+		vec3 teamColored = clamp(teamBase * shade, 0.0, 1.0);
+		base.rgb = mix(base.rgb, teamColored, teamWeight);
 	}
 	fragColor = base * oColor;
 }
@@ -376,9 +386,9 @@ GLuint LoadTexture(
 			if (encoding == TextureEncoding::ShadowR8) {
 				packedPixels[i] = sourcePixels[i * 4];
 			} else {
-				// Exported masks use 0 for non-team-color pixels and 1..128 for
-				// original SLD player-color indices 0..127. Preserve that compact
-				// encoding exactly; do not quantize it back to the legacy 8 shades.
+				// Exported masks retain the decoded BC4 R value as a continuous
+				// player-color blend weight. The PNG keeps RGBA for inspection, but
+				// only R is uploaded as nearest-filtered GL_R8.
 				packedPixels[i] = sourcePixels[i * 4];
 			}
 		}
@@ -468,8 +478,6 @@ public:
 	std::vector<Aoe2UnitInstanceDesc> destroyedTestInstances;
 	Shader::IProgramObject* mainShader = nullptr;
 	Shader::IProgramObject* shadowShader = nullptr;
-	GLuint playerColorPaletteTexture = 0;
-	std::uint64_t playerColorPaletteTextureBytes = 0;
 	GLuint quadVbo = 0;
 	GLuint quadEbo = 0;
 	std::array<GLuint, 4> gpuQueries{};
@@ -493,10 +501,8 @@ Shader::IProgramObject* Aoe2RendererImpl::CreateShader(const char* name, std::st
 	program->Link();
 	program->Enable();
 	program->SetUniform("diffuseTex", 0);
-	if (std::string_view(name) == "Main") {
+	if (std::string_view(name) == "Main")
 		program->SetUniform("playerColorTex", 1);
-		program->SetUniform("playerPalette", 2);
-	}
 	program->Disable();
 	program->Validate();
 	return program->IsValid() ? program : nullptr;
@@ -527,16 +533,6 @@ bool Aoe2RendererImpl::Init()
 		LOG_L(L_WARNING, "[Aoe2UnitRenderer] cache root does not exist: %s", cacheRoot.string().c_str());
 		return false;
 	}
-	try {
-		playerColorPaletteTexture = LoadTexture(
-			cacheRoot / "playercolor_palette.png", false, TextureEncoding::Rgba,
-			playerColorPaletteTextureBytes, 128, 8);
-		diagnostics.textureBytes += playerColorPaletteTextureBytes;
-	} catch (const std::exception& error) {
-		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to load player-color palette: %s", error.what());
-		return false;
-	}
-
 	static constexpr float quadVertices[] = {
 		 0.5f,  0.5f, 0.0f,
 		-0.5f,  0.5f, 0.0f,
@@ -582,8 +578,6 @@ void Aoe2RendererImpl::Kill()
 	if (quadEbo != 0) glDeleteBuffers(1, &quadEbo);
 	if (quadVbo != 0) glDeleteBuffers(1, &quadVbo);
 	if (gpuQueries[0] != 0) glDeleteQueries(static_cast<GLsizei>(gpuQueries.size()), gpuQueries.data());
-	if (playerColorPaletteTexture != 0) glDeleteTextures(1, &playerColorPaletteTexture);
-	playerColorPaletteTexture = 0;
 	shaderHandler->ReleaseProgramObjects("[Aoe2UnitRenderer]");
 	mainShader = nullptr;
 	shadowShader = nullptr;
@@ -674,7 +668,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 		const std::string kind = GetString(document["kind"]);
 		if ((schemaVersion != 2 && schemaVersion != 3) || kind != "aoe2de_unit" || GetString(document["id"]) != unitId)
 			throw std::runtime_error("unsupported unit manifest");
-		if (GetString(document["export_settings"]["player_color"]["format"]) != "r8_palette_index_plus_one")
+		if (GetString(document["export_settings"]["player_color"]["format"]) != "rgba8_bc4_decoded")
 			throw std::runtime_error("unsupported player-color format");
 		simdjson::dom::object manifestAnimations;
 		if (const auto error = document["animations"].get_object().get(manifestAnimations); error != simdjson::SUCCESS)
@@ -1208,7 +1202,6 @@ void Aoe2RendererImpl::Draw()
 	GLint oldVao = 0;
 	GLint oldTexture0 = 0;
 	GLint oldTexture1 = 0;
-	GLint oldTexture2 = 0;
 	glGetBooleanv(GL_DEPTH_WRITEMASK, &oldDepthMask);
 	glGetIntegerv(GL_DEPTH_FUNC, &oldDepthFunc);
 	glGetIntegerv(GL_BLEND_SRC_RGB, &oldBlendSrc);
@@ -1224,10 +1217,6 @@ void Aoe2RendererImpl::Draw()
 	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture0);
 	glActiveTexture(GL_TEXTURE1);
 	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture1);
-	glActiveTexture(GL_TEXTURE2);
-	glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTexture2);
-	glBindTexture(GL_TEXTURE_2D, playerColorPaletteTexture);
-	glActiveTexture(GL_TEXTURE0);
 
 	glEnable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
@@ -1248,8 +1237,6 @@ void Aoe2RendererImpl::Draw()
 			DrawBatch(animation, animation.mainBatch, false);
 	}
 
-	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, oldTexture2);
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, oldTexture1);
 	glActiveTexture(GL_TEXTURE0);
