@@ -4,11 +4,27 @@
 
 #include "System/float3.h"
 
+#include <algorithm>
 #include <cassert>
+
+#if SUPPORT_AOE_ARMOR
+#include <limits>
+
+#include "System/StringUtil.h"
+#endif
 
 #include "System/Misc/TracyDefs.h"
 
 CR_BIND(DamageArray, )
+
+#if SUPPORT_AOE_ARMOR
+CR_BIND(AoeArmorEntry, )
+
+CR_REG_METADATA(AoeArmorEntry, (
+	CR_MEMBER(name),
+	CR_MEMBER(value)
+))
+#endif
 
 CR_REG_METADATA(DamageArray, (
 	CR_MEMBER(paralyzeDamageTime),
@@ -17,7 +33,69 @@ CR_REG_METADATA(DamageArray, (
 	CR_MEMBER(craterMult),
 	CR_MEMBER(craterBoost),
 	CR_MEMBER(damages)
+#if SUPPORT_AOE_ARMOR
+	,
+	CR_MEMBER(aoeDamage)
+#endif
 ))
+
+#if SUPPORT_AOE_ARMOR
+void NormalizeAoeArmorEntries(AoeArmorEntries& entries)
+{
+	for (AoeArmorEntry& entry: entries)
+		entry.name = StringToLower(entry.name);
+
+	std::sort(entries.begin(), entries.end(), [](const AoeArmorEntry& lhs, const AoeArmorEntry& rhs) {
+		return lhs.name < rhs.name;
+	});
+
+	AoeArmorEntries normalized;
+	normalized.reserve(entries.size());
+	for (const AoeArmorEntry& entry: entries) {
+		if (entry.name.empty())
+			continue;
+
+		if (!normalized.empty() && normalized.back().name == entry.name) {
+			const int64_t sum = int64_t(normalized.back().value) + entry.value;
+			normalized.back().value = int(std::clamp<int64_t>(sum, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
+			continue;
+		}
+
+		normalized.push_back(entry);
+	}
+
+	entries = std::move(normalized);
+}
+
+
+void AddAoeArmorEntries(AoeArmorEntries& entries, const AoeArmorEntries& deltas)
+{
+	entries.insert(entries.end(), deltas.begin(), deltas.end());
+	NormalizeAoeArmorEntries(entries);
+}
+
+
+int CalculateAoeArmorDamage(const AoeArmorEntries& attack, const AoeArmorEntries& armor)
+{
+	int64_t totalDamage = 0;
+	std::size_t attackIndex = 0;
+	std::size_t armorIndex = 0;
+
+	while (attackIndex < attack.size()) {
+		while (armorIndex < armor.size() && armor[armorIndex].name < attack[attackIndex].name)
+			++armorIndex;
+
+		const int armorValue = (armorIndex < armor.size() && armor[armorIndex].name == attack[attackIndex].name)? armor[armorIndex].value: 0;
+		totalDamage += std::max(0, attack[attackIndex].value - armorValue);
+		if (totalDamage >= std::numeric_limits<int>::max())
+			return std::numeric_limits<int>::max();
+
+		++attackIndex;
+	}
+
+	return std::max(1, int(totalDamage));
+}
+#endif
 
 void DamageArray::SetDefaultDamage(float damage)
 {

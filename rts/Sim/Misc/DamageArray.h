@@ -7,7 +7,28 @@
 #include <vector>
 #include "System/creg/creg_cond.h"
 
+#if SUPPORT_AOE_ARMOR
+#include <string>
+#endif
+
 class float3;
+
+#if SUPPORT_AOE_ARMOR
+struct AoeArmorEntry {
+	CR_DECLARE_STRUCT(AoeArmorEntry)
+
+	std::string name;
+	int value = 0;
+};
+
+
+using AoeArmorEntries = std::vector<AoeArmorEntry>;
+
+
+void NormalizeAoeArmorEntries(AoeArmorEntries& entries);
+void AddAoeArmorEntries(AoeArmorEntries& entries, const AoeArmorEntries& deltas);
+int CalculateAoeArmorDamage(const AoeArmorEntries& attack, const AoeArmorEntries& armor);
+#endif
 
 class DamageArray
 {
@@ -42,6 +63,9 @@ public:
 		craterBoost = da.craterBoost;
 
 		damages = da.damages;
+#if SUPPORT_AOE_ARMOR
+		aoeDamage = da.aoeDamage;
+#endif
 		return *this;
 	}
 	DamageArray& operator = (DamageArray&& da) {
@@ -54,6 +78,9 @@ public:
 		craterBoost = da.craterBoost;
 
 		damages = std::move(da.damages);
+#if SUPPORT_AOE_ARMOR
+		aoeDamage = std::move(da.aoeDamage);
+#endif
 		return *this;
 	}
 
@@ -75,6 +102,12 @@ public:
 	float Get(int typeIndex) const { return damages[typeIndex]; }
 	float GetDefault() const { return damages[0]; }
 
+#if SUPPORT_AOE_ARMOR
+	bool HasAoeDamage() const { return !aoeDamage.empty(); }
+	const AoeArmorEntries& GetAoeDamage() const { return aoeDamage; }
+	AoeArmorEntries& GetAoeDamage() { return aoeDamage; }
+#endif
+
 public:
 	int paralyzeDamageTime;
 
@@ -86,6 +119,10 @@ public:
 
 protected:
 	std::vector<float> damages;
+
+#if SUPPORT_AOE_ARMOR
+	AoeArmorEntries aoeDamage;
+#endif
 };
 
 

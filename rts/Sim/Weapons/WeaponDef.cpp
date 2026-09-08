@@ -1,6 +1,11 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 #include "WeaponDef.h"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
+
 #include "Game/TraceRay.h"
 #include "Rendering/Models/IModelParser.h"
 #include "Rendering/Textures/ColorMap.h"
@@ -20,6 +25,52 @@
 
 
 static DefType WeaponDefs("WeaponDefs");
+
+#if SUPPORT_AOE_ARMOR
+namespace {
+
+bool ParseAoeDamageEntries(const LuaTable& table, AoeArmorEntries& entries, const char* weaponName)
+{
+	if (!table.IsValid())
+		return false;
+
+	std::vector<std::pair<std::string, float>> values;
+	table.GetPairs(values);
+	entries.clear();
+	entries.reserve(values.size());
+
+	for (const auto& [entryName, entryValue]: values) {
+		if (entryName.empty() || !std::isfinite(entryValue) || std::floor(entryValue) != entryValue || entryValue < std::numeric_limits<int>::min() || entryValue > std::numeric_limits<int>::max()) {
+			LOG_L(L_WARNING, "WeaponDef %s has invalid AOE damage entry '%s' = %f", weaponName, entryName.c_str(), entryValue);
+			continue;
+		}
+
+		entries.push_back({entryName, int(entryValue)});
+	}
+
+	NormalizeAoeArmorEntries(entries);
+	return true;
+}
+
+
+void ParseAoeUpgradeTags(const LuaTable& table, std::vector<std::string>& tags)
+{
+	tags.clear();
+	if (!table.IsValid())
+		return;
+
+	for (unsigned int index = 1; index <= table.GetLength(); ++index) {
+		const std::string tag = StringToLower(table.GetString(index, ""));
+		if (!tag.empty())
+			tags.push_back(tag);
+	}
+
+	std::sort(tags.begin(), tags.end());
+	tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+}
+
+}
+#endif
 
 #define WEAPONTAG(T, name, ...) DEFTAG(WeaponDefs, WeaponDef, T, name, ##__VA_ARGS__)
 #define WEAPONDUMMYTAG(T, name) DUMMYTAG(WeaponDefs, T, name)
@@ -423,6 +474,14 @@ WeaponDef::WeaponDef(const LuaTable& wdTable, const std::string& name_, int id_)
 
 		if (!paralyzer)
 			damages.paralyzeDamageTime = 0;
+
+#if SUPPORT_AOE_ARMOR
+		const bool aoeDamageEnabled = ParseAoeDamageEntries(wdTable.SubTable("aoeDamage"), damages.GetAoeDamage(), name.c_str());
+		ParseAoeUpgradeTags(wdTable.SubTable("aoeUpgradeTags"), aoeUpgradeTags);
+		if (aoeDamageEnabled && damages.dynDamageExp > 0.0f) {
+			LOG_L(L_WARNING, "WeaponDef %s combines aoeDamage with dynDamageExp; AOE damage ignores range falloff", name.c_str());
+		}
+#endif
 
 
 		static std::vector<std::pair<std::string, float>> dmgs;

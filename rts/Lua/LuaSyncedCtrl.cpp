@@ -1,5 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
+#include <cmath>
+#include <limits>
 #include <vector>
 #include <cctype>
 
@@ -199,6 +201,10 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(SetUnitAoe2WeaponMuzzleOverride);
 #endif
 	REGISTER_LUA_CFUNC(SetUnitWeaponDamages);
+#if SUPPORT_AOE_ARMOR
+	REGISTER_LUA_CFUNC(AddUnitAoeArmor);
+	REGISTER_LUA_CFUNC(AddUnitAoeWeaponDamage);
+#endif
 	REGISTER_LUA_CFUNC(SetUnitMaxRange);
 	REGISTER_LUA_CFUNC(SetUnitExperience);
 	REGISTER_LUA_CFUNC(AddUnitExperience);
@@ -2792,6 +2798,82 @@ int LuaSyncedCtrl::SetUnitWeaponDamages(lua_State* L)
 
 	return 0;
 }
+
+
+#if SUPPORT_AOE_ARMOR
+static bool ParseAoeArmorDeltas(lua_State* L, int index, AoeArmorEntries& deltas)
+{
+	if (!lua_istable(L, index))
+		return false;
+
+	deltas.clear();
+	for (lua_pushnil(L); lua_next(L, index) != 0; lua_pop(L, 1)) {
+		if (!lua_israwstring(L, LUA_TABLE_KEY_INDEX) || !lua_isnumber(L, LUA_TABLE_VALUE_INDEX))
+			continue;
+
+		const float value = lua_tofloat(L, LUA_TABLE_VALUE_INDEX);
+		if (!std::isfinite(value) || std::floor(value) != value || value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max())
+			continue;
+
+		deltas.push_back({lua_tostring(L, LUA_TABLE_KEY_INDEX), int(value)});
+	}
+
+	NormalizeAoeArmorEntries(deltas);
+	return !deltas.empty();
+}
+
+
+/***
+ * @function Spring.AddUnitAoeArmor
+ * @param unitID integer
+ * @param deltas table<string, integer> Armor-class deltas.
+ * @return boolean applied
+ */
+int LuaSyncedCtrl::AddUnitAoeArmor(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	AoeArmorEntries deltas;
+
+	if (unit == nullptr || !unit->aoeArmorEnabled || !ParseAoeArmorDeltas(L, 2, deltas)) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	AddAoeArmorEntries(unit->aoeArmor, deltas);
+	lua_pushboolean(L, true);
+	return 1;
+}
+
+
+/***
+ * @function Spring.AddUnitAoeWeaponDamage
+ * @param unitID integer
+ * @param weaponNum integer
+ * @param deltas table<string, integer> Attack-class deltas.
+ * @return boolean applied
+ */
+int LuaSyncedCtrl::AddUnitAoeWeaponDamage(lua_State* L)
+{
+	CUnit* unit = ParseUnit(L, __func__, 1);
+	AoeArmorEntries deltas;
+
+	if (unit == nullptr || !ParseAoeArmorDeltas(L, 3, deltas)) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	const size_t weaponNum = luaL_checkint(L, 2) - LUA_WEAPON_BASE_INDEX;
+	if (weaponNum >= unit->weapons.size() || !unit->weapons[weaponNum]->damages->HasAoeDamage()) {
+		lua_pushboolean(L, false);
+		return 1;
+	}
+
+	DynDamageArray* damages = DynDamageArray::GetMutable(unit->weapons[weaponNum]->damages);
+	AddAoeArmorEntries(damages->GetAoeDamage(), deltas);
+	lua_pushboolean(L, true);
+	return 1;
+}
+#endif
 
 
 /*** @function Spring.SetUnitMaxRange

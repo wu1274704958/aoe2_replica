@@ -49,6 +49,10 @@ static int WeaponsTable(lua_State* L, const void* data);
 static int CategorySetFromBits(lua_State* L, const void* data);
 static int CategorySetFromString(lua_State* L, const void* data);
 static int MoveSpeedToElmosPerSecond(lua_State* L, const void* data);
+#if SUPPORT_AOE_ARMOR
+static int AoeArmorTable(lua_State* L, const void* data);
+static int AoeUpgradeTagsTable(lua_State* L, const void* data);
+#endif
 
 
 /******************************************************************************/
@@ -306,6 +310,38 @@ static int CustomParamsTable(lua_State* L, const void* data)
 	}
 	return 1;
 }
+
+
+#if SUPPORT_AOE_ARMOR
+static int AoeArmorTable(lua_State* L, const void* data)
+{
+	const UnitDef& unitDef = *static_cast<const UnitDef*>(data);
+	lua_createtable(L, 0, unitDef.aoeArmor.size());
+
+	for (const AoeArmorEntry& entry: unitDef.aoeArmor) {
+		lua_pushsstring(L, entry.name);
+		lua_pushnumber(L, entry.value);
+		lua_rawset(L, -3);
+	}
+
+	return 1;
+}
+
+
+static int AoeUpgradeTagsTable(lua_State* L, const void* data)
+{
+	const UnitDef& unitDef = *static_cast<const UnitDef*>(data);
+	lua_createtable(L, unitDef.aoeUpgradeTags.size(), 0);
+
+	for (std::size_t index = 0; index < unitDef.aoeUpgradeTags.size(); ++index) {
+		lua_pushnumber(L, index + 1);
+		lua_pushsstring(L, unitDef.aoeUpgradeTags[index]);
+		lua_rawset(L, -3);
+	}
+
+	return 1;
+}
+#endif
 
 
 static int BuildOptions(lua_State* L, const void* data)
@@ -599,6 +635,10 @@ ADD_BOOL("canAttackWater",  canAttackWater); // CUSTOM
 	ADD_FUNCTION("noChaseCategories",  ud.noChaseCategory, CategorySetFromBits);
 
 	ADD_FUNCTION("customParams",       ud.customParams,       CustomParamsTable);
+#if SUPPORT_AOE_ARMOR
+	ADD_FUNCTION("aoeArmor",           ud,                     AoeArmorTable);
+	ADD_FUNCTION("aoeUpgradeTags",     ud,                     AoeUpgradeTagsTable);
+#endif
 	ADD_FUNCTION("buildOptions",       ud.buildOptions,       BuildOptions);
 	ADD_FUNCTION("decoyDef",           ud.decoyDef,           UnitDefToID);
 	ADD_FUNCTION("weapons",            ud.weapons,            WeaponsTable);

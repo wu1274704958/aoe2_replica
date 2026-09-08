@@ -48,6 +48,10 @@ static int VisualsTable(lua_State* L, const void* data);
 static int DamagesArray(lua_State* L, const void* data);
 static int CustomParamsTable(lua_State* L, const void* data);
 static int GuiSoundSetTable(lua_State* L, const void* data);
+#if SUPPORT_AOE_ARMOR
+static int AoeDamageTable(lua_State* L, const void* data);
+static int AoeUpgradeTagsTable(lua_State* L, const void* data);
+#endif
 //static int CategorySetFromBits(lua_State* L, const void* data);
 
 
@@ -397,6 +401,39 @@ static int CustomParamsTable(lua_State* L, const void* data)
 }
 
 
+#if SUPPORT_AOE_ARMOR
+static int AoeDamageTable(lua_State* L, const void* data)
+{
+	const WeaponDef& weaponDef = *static_cast<const WeaponDef*>(data);
+	const AoeArmorEntries& entries = weaponDef.damages.GetAoeDamage();
+	lua_createtable(L, 0, entries.size());
+
+	for (const AoeArmorEntry& entry: entries) {
+		lua_pushsstring(L, entry.name);
+		lua_pushnumber(L, entry.value);
+		lua_rawset(L, -3);
+	}
+
+	return 1;
+}
+
+
+static int AoeUpgradeTagsTable(lua_State* L, const void* data)
+{
+	const WeaponDef& weaponDef = *static_cast<const WeaponDef*>(data);
+	lua_createtable(L, weaponDef.aoeUpgradeTags.size(), 0);
+
+	for (std::size_t index = 0; index < weaponDef.aoeUpgradeTags.size(); ++index) {
+		lua_pushnumber(L, index + 1);
+		lua_pushsstring(L, weaponDef.aoeUpgradeTags[index]);
+		lua_rawset(L, -3);
+	}
+
+	return 1;
+}
+#endif
+
+
 static int GuiSoundSetTable(lua_State* L, const void* data)
 {
 	const GuiSoundSet& soundSet = *static_cast<const GuiSoundSet*>(data);
@@ -445,6 +482,10 @@ static bool InitParamMap()
 	ADD_FUNCTION("fireSound",    wd.fireSound, GuiSoundSetTable);
 
 	ADD_FUNCTION("customParams",         wd.customParams,   CustomParamsTable);
+#if SUPPORT_AOE_ARMOR
+	ADD_FUNCTION("aoeDamage",             wd,                 AoeDamageTable);
+	ADD_FUNCTION("aoeUpgradeTags",        wd,                 AoeUpgradeTagsTable);
+#endif
 	ADD_FUNCTION("noEnemyCollide",       wd.collisionFlags, NoEnemyCollide);
 	ADD_FUNCTION("noFriendlyCollide",    wd.collisionFlags, NoFriendlyCollide);
 	ADD_FUNCTION("noFeatureCollide",     wd.collisionFlags, NoFeatureCollide);

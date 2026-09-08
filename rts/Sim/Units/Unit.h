@@ -7,6 +7,9 @@
 
 #include "Sim/Objects/SolidObject.h"
 #include "Sim/Misc/Resource.h"
+#if SUPPORT_AOE_ARMOR
+#include "Sim/Misc/DamageArray.h"
+#endif
 #include "Sim/Weapons/WeaponTarget.h"
 #include "System/Matrix44f.h"
 #include "System/type2.h"
@@ -425,6 +428,11 @@ public:
 	float lastMuzzleFlameSize = 0.0f;
 
 	int armorType = 0;
+
+#if SUPPORT_AOE_ARMOR
+	bool aoeArmorEnabled = false;
+	AoeArmorEntries aoeArmor;
+#endif
 	// what categories the unit is part of (bitfield)
 	unsigned int category = 0;
 

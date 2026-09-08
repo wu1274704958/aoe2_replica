@@ -23,11 +23,54 @@
 #include "System/Misc/TracyDefs.h"
 
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 /******************************************************************************/
 
 namespace {
+
+#if SUPPORT_AOE_ARMOR
+bool ParseAoeArmorEntries(const LuaTable& table, AoeArmorEntries& entries, const char* ownerName, const char* tableName)
+{
+	if (!table.IsValid())
+		return false;
+
+	std::vector<std::pair<std::string, float>> values;
+	table.GetPairs(values);
+	entries.clear();
+	entries.reserve(values.size());
+
+	for (const auto& [entryName, entryValue]: values) {
+		if (entryName.empty() || !std::isfinite(entryValue) || std::floor(entryValue) != entryValue || entryValue < std::numeric_limits<int>::min() || entryValue > std::numeric_limits<int>::max()) {
+			LOG_L(L_WARNING, "%s %s has invalid AOE armor entry '%s' = %f", ownerName, tableName, entryName.c_str(), entryValue);
+			continue;
+		}
+
+		entries.push_back({entryName, int(entryValue)});
+	}
+
+	NormalizeAoeArmorEntries(entries);
+	return true;
+}
+
+
+void ParseAoeUpgradeTags(const LuaTable& table, std::vector<std::string>& tags)
+{
+	tags.clear();
+	if (!table.IsValid())
+		return;
+
+	for (unsigned int index = 1; index <= table.GetLength(); ++index) {
+		const std::string tag = StringToLower(table.GetString(index, ""));
+		if (!tag.empty())
+			tags.push_back(tag);
+	}
+
+	std::sort(tags.begin(), tags.end());
+	tags.erase(std::unique(tags.begin(), tags.end()), tags.end());
+}
+#endif
 
 bool ParseAnchorVector(const spring::unordered_map<std::string, std::string>& params, const char* key, float3& value)
 {
@@ -772,6 +815,11 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 		paramsTable.GetMap(customParams);
 		ParseUnitDefAnchors(*this);
 	}
+
+#if SUPPORT_AOE_ARMOR
+	aoeArmorEnabled = ParseAoeArmorEntries(udTable.SubTable("aoeArmor"), aoeArmor, "UnitDef", name.c_str());
+	ParseAoeUpgradeTags(udTable.SubTable("aoeUpgradeTags"), aoeUpgradeTags);
+#endif
 	{
 		const LuaTable&      sfxTable =  udTable.SubTable("SFXTypes");
 		const LuaTable& modelCEGTable = sfxTable.SubTable(     "explosionGenerators");

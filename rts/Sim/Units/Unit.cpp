@@ -278,6 +278,10 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	buildTime = unitDef->buildTime;
 	armoredMultiple = unitDef->armoredMultiple;
 	armorType = unitDef->armorType;
+#if SUPPORT_AOE_ARMOR
+	aoeArmorEnabled = unitDef->aoeArmorEnabled;
+	aoeArmor = unitDef->aoeArmor;
+#endif
 	category = unitDef->category;
 	leaveTracks = unitDef->decalDef.leaveTrackDecals;
 
@@ -1345,6 +1349,12 @@ void CUnit::DoDamage(
 		return;
 
 	float baseDamage = damages.Get(armorType);
+#if SUPPORT_AOE_ARMOR
+	if (damages.HasAoeDamage()) {
+		static const AoeArmorEntries emptyAoeArmor;
+		baseDamage = CalculateAoeArmorDamage(damages.GetAoeDamage(), aoeArmorEnabled? aoeArmor: emptyAoeArmor);
+	}
+#endif
 	float experienceMod = globalUnitParams.expMultiplier;
 	float impulseMult = 1.0f;
 
@@ -3188,6 +3198,10 @@ CR_REG_METADATA(CUnit, (
 	CR_MEMBER(flankingBonusDir),
 
 	CR_MEMBER(armorType),
+#if SUPPORT_AOE_ARMOR
+	CR_MEMBER(aoeArmorEnabled),
+	CR_MEMBER(aoeArmor),
+#endif
 	CR_MEMBER(category),
 
 	CR_MEMBER(mapSquare),

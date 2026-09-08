@@ -137,4 +137,10 @@ return {
 		type = "bool",
 		def = false,
 	},
+	aoe_armor_upgrade_test = {
+		name = "AOE armor upgrade test",
+		desc = "Apply the configured AOE attack and armor upgrades after both test teams spawn",
+		type = "bool",
+		def = false,
+	},
 }

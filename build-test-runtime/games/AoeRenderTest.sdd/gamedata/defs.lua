@@ -43,6 +43,12 @@ return {
 			attackStartSpeedThreshold = 0.3,
 			upright = true,
 			sightDistance = 500,
+			aoeArmor = {
+				melee = 0,
+				pierce = 0,
+				infantry = 0,
+			},
+			aoeUpgradeTags = { "archer", "infantry" },
 				customParams = {
 				aoe2_unit_id = "u_arc_archer",
 				aoe2_scale = "1.0",
@@ -100,6 +106,12 @@ return {
 			attackStartSpeedThreshold = 0.3,
 			upright = true,
 			sightDistance = 500,
+			aoeArmor = {
+				melee = 1,
+				pierce = 1,
+				cavalry = 0,
+			},
+			aoeUpgradeTags = { "cavalry" },
 			customParams = {
 				aoe2_unit_id = "u_cam_camel_scout",
 				aoe2_scale = "1.0",
@@ -193,6 +205,10 @@ return {
 			avoidFeature = false,
 			collideFeature = false,
 			damage = { default = 5 },
+			aoeDamage = {
+				pierce = 5,
+			},
+			aoeUpgradeTags = { "archer" },
 			customParams = {
 				aoe2_projectile_id = "p_arrow",
 				aoe2_projectile_scale = "1.0",
@@ -217,6 +233,11 @@ return {
 			turret = false,
 			tolerance = 1820,
 			damage = { default = 10 },
+			aoeDamage = {
+				melee = 7,
+				cavalry = 2,
+			},
+			aoeUpgradeTags = { "cavalry" },
 		},
 	},
 	ArmorDefs = {},

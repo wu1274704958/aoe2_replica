@@ -18,16 +18,14 @@ numallies=0;
 {
 luagaia=0;
 luarules=1;
-aoe_attack_cannot_move=1;
-aoe_team_spacing=42;
 aoe_orthographic_test_camera=1;
 aoe_global_los=1;
 aoe_fixed_test_camera=1;
-aoe_explicit_move_regression=0;
-aoe_team_b_count=100;
-aoe_team_a_count=100;
-aoe_team_separation=1400;
+aoe_team_b_count=16;
+aoe_team_a_count=16;
+aoe_team_separation=900;
 aoe_camel_scout_fraction=0.25;
+aoe_armor_upgrade_test=1;
 aoe_attack_move_start_frame=150;
 aoe_team_b_counter_attack=1;
 }
@@ -35,7 +33,7 @@ aoe_team_b_counter_attack=1;
 {
 team=0;
 spectator=0;
-name=RecoilBuildTest;
+name=RecoilArmorTest;
 }
 [mapoptions]
 {
@@ -58,10 +56,9 @@ initblank=1;
 numteams=2;
 gametype=AOE Render Test 0.6;
 mapname=AOE Blank Map Test;
-myplayername=RecoilBuildTest;
+myplayername=RecoilArmorTest;
 startpostype=0;
 fixedrngseed=1;
 numplayers=1;
-recorddemo=0;
 gamestartdelay=0;
 }

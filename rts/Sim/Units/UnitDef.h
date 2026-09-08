@@ -8,6 +8,9 @@
 #include "Sim/Misc/GuiSoundSet.h"
 #include "Sim/Objects/SolidObject.h"
 #include "Sim/Objects/SolidObjectDef.h"
+#if SUPPORT_AOE_ARMOR
+#include "Sim/Misc/DamageArray.h"
+#endif
 #include "System/float3.h"
 #include "System/UnorderedMap.hpp"
 
@@ -230,6 +233,12 @@ public:
 
 	float armoredMultiple;
 	int armorType;
+
+#if SUPPORT_AOE_ARMOR
+	bool aoeArmorEnabled = false;
+	AoeArmorEntries aoeArmor;
+	std::vector<std::string> aoeUpgradeTags;
+#endif
 
 	/**
 	 * 0: no flanking bonus

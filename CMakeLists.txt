@@ -284,6 +284,13 @@ else ()
 	add_definitions(-DAOE_DEV_TOOL=0)
 endif ()
 
+option(SUPPORT_AOE_ARMOR "Build the experimental AOE2 class-based armor system" ON)
+if (SUPPORT_AOE_ARMOR)
+	add_definitions(-DSUPPORT_AOE_ARMOR=1)
+else ()
+	add_definitions(-DSUPPORT_AOE_ARMOR=0)
+endif ()
+
 if    (WIN32)
 	## internal AVI recorder (w/o sound atm)
 	option(NO_AVI "Disable in-game video recording" FALSE)

@@ -72,6 +72,7 @@ local positionDiagnosticEnabled = ReadBooleanOption("aoe_position_diagnostics", 
 local positionDiagnosticSamplesPerTeam = math.floor(ReadNumberOption("aoe_position_diagnostic_samples", 64, 1, 128))
 local explicitMoveRegressionEnabled = ReadBooleanOption("aoe_explicit_move_regression", false)
 local attackCannotMoveConfigured = ReadBooleanOption("aoe_attack_cannot_move", true)
+local armorUpgradeTestEnabled = ReadBooleanOption("aoe_armor_upgrade_test", false)
 local statusLogPeriod = 150
 local eliminationCheckPeriod = 15
 local stalledDistanceThreshold = 128
@@ -983,6 +984,12 @@ function gadget:GameStart()
 end
 
 function gadget:GameFrame(frame)
+	if armorUpgradeTestEnabled and frame == 60 and GG.AoeArmor ~= nil then
+		GG.AoeArmor.ApplyTeamUpgrade(0, "fletching")
+		GG.AoeArmor.ApplyTeamUpgrade(1, "padded_archer_armor")
+		Spring.Echo("[AOE Armor Test] applied Team A fletching and Team B padded archer armor")
+	end
+
 	if anchorCalibration or meleeCalibration or meleeBattle then
 		return
 	end

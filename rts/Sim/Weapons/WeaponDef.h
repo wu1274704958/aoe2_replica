@@ -223,6 +223,10 @@ public:
 
 	spring::unordered_map<std::string, std::string> customParams;
 
+#if SUPPORT_AOE_ARMOR
+	std::vector<std::string> aoeUpgradeTags;
+#endif
+
 	struct Visuals {
 		float3 color;
 		float3 color2;

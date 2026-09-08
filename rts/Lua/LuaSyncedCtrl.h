@@ -96,6 +96,10 @@ class LuaSyncedCtrl
 		static int SetUnitAoe2WeaponMuzzleOverride(lua_State* L);
 #endif
 		static int SetUnitWeaponDamages(lua_State* L);
+#if SUPPORT_AOE_ARMOR
+		static int AddUnitAoeArmor(lua_State* L);
+		static int AddUnitAoeWeaponDamage(lua_State* L);
+#endif
 		static int SetUnitMaxRange(lua_State* L);
 		static int SetUnitExperience(lua_State* L);
 		static int AddUnitExperience(lua_State* L);
