@@ -66,6 +66,7 @@ local camelScoutFraction = ReadNumberOption("aoe_camel_scout_fraction", 0, 0, 1)
 local globalLosForTeamA = ReadBooleanOption("aoe_global_los", true)
 local anchorValidation = ReadBooleanOption("aoe_anchor_validation", false)
 local anchorCalibration = ReadBooleanOption("aoe_anchor_calibration", false)
+local buildingTest = ReadBooleanOption("aoe_building_test", false)
 local meleeCalibration = ReadBooleanOption("aoe_melee_calibration", false)
 local meleeBattle = ReadBooleanOption("aoe_melee_battle", false)
 local positionDiagnosticEnabled = ReadBooleanOption("aoe_position_diagnostics", true)
@@ -935,7 +936,7 @@ local function SpawnAnchorValidation()
 end
 
 function gadget:GameStart()
-	if meleeCalibration or meleeBattle then
+	if buildingTest or meleeCalibration or meleeBattle then
 		return
 	end
 
@@ -990,7 +991,7 @@ function gadget:GameFrame(frame)
 		Spring.Echo("[AOE Armor Test] applied Team A fletching and Team B padded archer armor")
 	end
 
-	if anchorCalibration or meleeCalibration or meleeBattle then
+	if buildingTest or anchorCalibration or meleeCalibration or meleeBattle then
 		return
 	end
 

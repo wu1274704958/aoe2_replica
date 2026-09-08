@@ -134,8 +134,10 @@ struct Animation {
 struct Appearance {
 	std::string id;
 	std::uint32_t generation = 1;
-	std::array<Animation, 4> animations;
-	std::array<bool, 4> loaded{false, false, false, false};
+	std::array<Animation, AOE2_ANIMATION_SLOT_COUNT> animations;
+	std::array<bool, AOE2_ANIMATION_SLOT_COUNT> loaded{};
+	std::array<std::filesystem::path, AOE2_ANIMATION_SLOT_COUNT> configPaths;
+	std::array<bool, AOE2_ANIMATION_SLOT_COUNT> requirePlayerColor{};
 	int attackReleaseFrame = 0;
 };
 
@@ -244,7 +246,8 @@ std::size_t AnimationIndex(Aoe2UnitAnimationSlot slot)
 
 bool AnimationLoops(Aoe2UnitAnimationSlot slot)
 {
-	return slot == Aoe2UnitAnimationSlot::IdleA || slot == Aoe2UnitAnimationSlot::WalkA;
+	return slot == Aoe2UnitAnimationSlot::IdleA || slot == Aoe2UnitAnimationSlot::WalkA ||
+		slot == Aoe2UnitAnimationSlot::Built || slot == Aoe2UnitAnimationSlot::Rubble;
 }
 
 std::size_t NextCapacity(std::size_t requested)
@@ -451,10 +454,12 @@ public:
 	void Draw();
 
 	Aoe2AppearanceHandle Preload(const std::string& unitId);
+	Aoe2AppearanceHandle PreloadBuilding(const std::string& buildingId);
 	Aoe2AppearanceHandle PreloadGraphics(const std::string& graphicsId);
 	Aoe2InstanceHandle Create(const Aoe2UnitInstanceDesc& desc);
 	bool Destroy(Aoe2InstanceHandle handle);
 	Instance* Get(Aoe2InstanceHandle handle);
+	bool EnsureAnimation(Appearance& appearance, Aoe2UnitAnimationSlot animationSlot);
 
 	void CreateTestGrid();
 	void RebuildBatches();
@@ -681,7 +686,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 		static constexpr std::array<std::string_view, 4> animationNames = {
 			"idleA", "walkA", "attackA", "deathA",
 		};
-		for (std::size_t i = 0; i < appearance->animations.size(); ++i) {
+		for (std::size_t i = 0; i < animationNames.size(); ++i) {
 			const std::string name(animationNames[i]);
 			simdjson::dom::object entry;
 			if (const auto error = manifestAnimations[name].get_object().get(entry); error != simdjson::SUCCESS)
@@ -709,6 +714,100 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			}
 		}
 		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload unit %s: %s", unitId.c_str(), error.what());
+		return {};
+	}
+}
+
+bool Aoe2RendererImpl::EnsureAnimation(Appearance& appearance, Aoe2UnitAnimationSlot animationSlot)
+{
+	const std::size_t index = AnimationIndex(animationSlot);
+	if (index >= appearance.animations.size())
+		return false;
+	if (appearance.loaded[index])
+		return true;
+	if (appearance.configPaths[index].empty())
+		return false;
+
+	try {
+		appearance.animations[index] = LoadAnimation(
+			appearance.configPaths[index],
+			appearance.animations[index].name,
+			appearance.requirePlayerColor[index]
+		);
+		appearance.loaded[index] = true;
+		const auto& animation = appearance.animations[index];
+		diagnostics.textureBytes += animation.main.textureBytes;
+		diagnostics.textureBytes += animation.shadow.textureBytes;
+		diagnostics.textureBytes += animation.playerColor.textureBytes;
+		return true;
+	} catch (const std::exception& error) {
+		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to load %s animation %s: %s",
+			appearance.id.c_str(), appearance.animations[index].name.c_str(), error.what());
+		appearance.configPaths[index].clear();
+		return false;
+	}
+}
+
+Aoe2AppearanceHandle Aoe2RendererImpl::PreloadBuilding(const std::string& buildingId)
+{
+	const std::string cacheId = "buildings/" + buildingId;
+	for (std::size_t i = 0; i < appearances.size(); ++i) {
+		if (appearances[i] != nullptr && appearances[i]->id == cacheId)
+			return {static_cast<std::uint32_t>(i), appearances[i]->generation};
+	}
+
+	std::unique_ptr<Appearance> appearance;
+	try {
+		const auto manifestPath = cacheRoot / "buildings" / buildingId / "manifest.json";
+		simdjson::dom::parser parser;
+		simdjson::dom::element document;
+		if (const auto error = parser.load(manifestPath.string()).get(document); error != simdjson::SUCCESS)
+			throw std::runtime_error("failed to parse building manifest: " + std::string(simdjson::error_message(error)));
+		if (document["schema_version"].get_int64().value() != 4 ||
+			GetString(document["kind"]) != "aoe2de_building" || GetString(document["id"]) != buildingId)
+			throw std::runtime_error("unsupported building manifest");
+		if (GetString(document["export_settings"]["player_color"]["format"]) != "rgba8_bc4_decoded")
+			throw std::runtime_error("unsupported player-color format");
+
+		simdjson::dom::object states;
+		if (const auto error = document["states"].get_object().get(states); error != simdjson::SUCCESS)
+			throw std::runtime_error("building states are missing or invalid: " + std::string(simdjson::error_message(error)));
+		appearance = std::make_unique<Appearance>();
+		appearance->id = cacheId;
+		static constexpr std::array<std::pair<Aoe2UnitAnimationSlot, std::string_view>, 5> stateSlots = {{
+			{Aoe2UnitAnimationSlot::Built, "built"},
+			{Aoe2UnitAnimationSlot::Construction, "construction"},
+			{Aoe2UnitAnimationSlot::BuildingAttack, "attack"},
+			{Aoe2UnitAnimationSlot::Destruction, "destruction"},
+			{Aoe2UnitAnimationSlot::Rubble, "rubble"},
+		}};
+		for (const auto& [slot, stateName] : stateSlots) {
+			simdjson::dom::object entry;
+			if (states[stateName].get_object().get(entry) != simdjson::SUCCESS || GetString(entry["status"]) != "exported")
+				continue;
+			const std::size_t index = AnimationIndex(slot);
+			appearance->animations[index].name = std::string(stateName);
+			appearance->configPaths[index] = manifestPath.parent_path() / GetString(entry["config"]);
+			std::string playerColorStatus = "missing";
+			simdjson::dom::object layers;
+			if (entry["layers"].get_object().get(layers) == simdjson::SUCCESS)
+				playerColorStatus = GetString(layers["player_color"]);
+			appearance->requirePlayerColor[index] = IsUsableLayer(playerColorStatus);
+		}
+		if (!EnsureAnimation(*appearance, Aoe2UnitAnimationSlot::Built))
+			throw std::runtime_error("built state is unavailable");
+		const auto index = static_cast<std::uint32_t>(appearances.size());
+		appearances.push_back(std::move(appearance));
+		return {index, appearances.back()->generation};
+	} catch (const std::exception& error) {
+		if (appearance != nullptr) {
+			for (auto& animation : appearance->animations) {
+				DeleteLayerTexture(animation.main);
+				DeleteLayerTexture(animation.shadow);
+				DeleteLayerTexture(animation.playerColor);
+			}
+		}
+		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload building %s: %s", buildingId.c_str(), error.what());
 		return {};
 	}
 }
@@ -775,7 +874,8 @@ Aoe2InstanceHandle Aoe2RendererImpl::Create(const Aoe2UnitInstanceDesc& desc)
 	if (!desc.appearance || desc.appearance.index >= appearances.size() ||
 		appearances[desc.appearance.index] == nullptr ||
 		appearances[desc.appearance.index]->generation != desc.appearance.generation ||
-		AnimationIndex(desc.animation) >= appearances[desc.appearance.index]->animations.size())
+		AnimationIndex(desc.animation) >= appearances[desc.appearance.index]->animations.size() ||
+		!EnsureAnimation(*appearances[desc.appearance.index], desc.animation))
 		return {};
 
 	std::uint32_t index = 0;
@@ -937,8 +1037,9 @@ void Aoe2RendererImpl::Update()
 {
 	const auto started = std::chrono::steady_clock::now();
 	// Keep this lightweight renderer-only setting live so the anchor calibration
-	// scene can tune sprite scale without restarting or touching synced state.
+	// scenes can tune sprite placement without restarting or touching synced state.
 	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
+	mainCameraBias = configHandler->GetFloat("Aoe2UnitMainCameraBias");
 	const float deltaSeconds = std::clamp(globalRendering->lastFrameTime * 0.001f, 0.0f, 0.1f);
 	testElapsed += deltaSeconds;
 	if (!testHandles.empty() && !testCameraConfigured && camHandler != nullptr &&
@@ -1305,6 +1406,11 @@ Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadAppearance(const std::string& uni
 	return (renderer != nullptr) ? renderer->Preload(unitId) : Aoe2AppearanceHandle{};
 }
 
+Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadBuildingAppearance(const std::string& buildingId)
+{
+	return (renderer != nullptr) ? renderer->PreloadBuilding(buildingId) : Aoe2AppearanceHandle{};
+}
+
 Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadGraphicsAppearance(const std::string& graphicsId)
 {
 	return (renderer != nullptr) ? renderer->PreloadGraphics(graphicsId) : Aoe2AppearanceHandle{};
@@ -1318,10 +1424,10 @@ bool CAoe2UnitRenderer::GetAnimationInfo(
 {
 	if (renderer == nullptr || !appearance || appearance.index >= renderer->appearances.size())
 		return false;
-	const auto& appearancePtr = renderer->appearances[appearance.index];
+	auto& appearancePtr = renderer->appearances[appearance.index];
 	const std::size_t index = AnimationIndex(animationSlot);
 	if (appearancePtr == nullptr || appearancePtr->generation != appearance.generation ||
-		index >= appearancePtr->animations.size() || !appearancePtr->loaded[index])
+		index >= appearancePtr->animations.size() || !renderer->EnsureAnimation(*appearancePtr, animationSlot))
 		return false;
 
 	const auto& animation = appearancePtr->animations[index];
@@ -1358,7 +1464,10 @@ bool CAoe2UnitRenderer::SetTransform(Aoe2InstanceHandle handle, const float3& po
 bool CAoe2UnitRenderer::SetAnimation(Aoe2InstanceHandle handle, Aoe2UnitAnimationSlot animation, float playbackTime, float playbackSpeed)
 {
 	auto* instance = (renderer != nullptr) ? renderer->Get(handle) : nullptr;
-	if (instance == nullptr || AnimationIndex(animation) > AnimationIndex(Aoe2UnitAnimationSlot::DeathA)) return false;
+	if (instance == nullptr || instance->appearanceIndex >= renderer->appearances.size() ||
+		renderer->appearances[instance->appearanceIndex] == nullptr ||
+		!renderer->EnsureAnimation(*renderer->appearances[instance->appearanceIndex], animation))
+		return false;
 	instance->animation = animation;
 	instance->animationTime = std::max(0.0f, playbackTime);
 	instance->playbackSpeed = playbackSpeed;

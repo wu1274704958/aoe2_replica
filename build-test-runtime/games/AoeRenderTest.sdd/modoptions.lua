@@ -11,6 +11,12 @@ return {
 		type = "bool",
 		def = false,
 	},
+	aoe_building_test = {
+		name = "AOE building test",
+		desc = "Spawn four directional native AOE towers with debug anchor and collision overlays",
+		type = "bool",
+		def = false,
+	},
 	aoe_anchor_calibration = {
 		name = "AOE anchor calibration",
 		desc = "Spawn the static all-direction AOE remote-unit anchor calibration scene",

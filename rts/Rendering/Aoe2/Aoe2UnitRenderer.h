@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -12,7 +13,15 @@ enum class Aoe2UnitAnimationSlot : std::uint8_t {
 	WalkA,
 	AttackA,
 	DeathA,
+	Built,
+	Construction,
+	BuildingAttack,
+	Destruction,
+	Rubble,
+	Count,
 };
+
+constexpr std::size_t AOE2_ANIMATION_SLOT_COUNT = static_cast<std::size_t>(Aoe2UnitAnimationSlot::Count);
 
 struct Aoe2UnitAnimationInfo {
 	float durationSeconds = 0.0f;
@@ -77,6 +86,8 @@ public:
 	static bool IsAvailable();
 
 	static Aoe2AppearanceHandle PreloadAppearance(const std::string& unitId);
+	// Loads an exported schema-4 building cache entry into the shared sprite batches.
+	static Aoe2AppearanceHandle PreloadBuildingAppearance(const std::string& buildingId);
 	// Loads an exported graphics cache entry into the shared sprite batches.
 	static Aoe2AppearanceHandle PreloadGraphicsAppearance(const std::string& graphicsId);
 	static bool GetAnimationInfo(Aoe2AppearanceHandle appearance, Aoe2UnitAnimationSlot animation, Aoe2UnitAnimationInfo& info);

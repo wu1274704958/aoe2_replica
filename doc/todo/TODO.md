@@ -1,5 +1,7 @@
 # AOE 开发待办
 
+- [x] 为 AOE 建筑新增独立的 `aoe_tower_arrow` WeaponDef，并让 `aoe_afri_tower_age2` 使用它；保留弓手共用的 `aoe_arrow`（`turret=false`、朝向约束）不变。塔专用武器设为 `turret=true`，以支持 360° 静态防御射击；复用现有 Projectile 资源映射及无击退/仅直击配置，并在 AOE Building Test 中验证四个固定朝向的塔都可攻击进入射程的敌方弓手。
+
 - [x] 修复固定长焦测试相机下尸体 `DeathA` 与程序化 `Decay` 不可见的问题。仅当 AOE 测试场景启用 `aoe_fixed_test_camera` 时，在测试启动/配置层按“相机高度 + 地图半对角线 + 安全余量”动态提高 `FeatureDrawDistance` 和 `FeatureFadeDistance`；不得修改普通游戏的默认视野和 Feature 渲染规则。验证 `CUnit -> CFeature` 实例转移、死亡动画末帧保持及渐隐过程在完整地图视野下均可见，并避免将测试配置持久化到用户的普通引擎配置。
 - [x] 将测试弓箭定义改为无击退、仅直接命中：为 `aoe_arrow` 显式设置 `impulseFactor = 0`、`impulseBoost = 0` 和 `impactOnly = true`，避免箭矢的无效微小冲量中断 `attackCannotMove` 前摇，并消除测试箭矢的范围伤害。同步将攻击距离调整为 550，核对自动索敌、LOS 和 `CMD.FIGHT` 临时接敌范围，避免引入与原生 Attack Move 语义冲突的重复距离配置。
 - [x] 修复 `attackCannotMove` 单位在临时攻击目标死亡后错误丢失返回 `CMD.FIGHT` 和原始 `CMD.FIGHT` 的问题。触发链为：目标死亡后 CommandAI 立即处理后续 Fight，但攻击 Windup/Recovery 锁使 `GroundMoveType::StartMoving` 提前返回，遗留的 `atGoal=true` 随后被 `ExecuteMove` 误判为新命令已经完成。实现位于 `CMobileCAI::ExecuteMove`：仅当单位尚未几何到达、`owner->unitDef->attackCannotMove` 且 `owner->IsAttackMovementLocked()` 时保留命令并等待解锁；`attackCannotMove=false` 的普通单位完全沿用原有分支和时序。已通过增量编译和短时双队场景启动验证。

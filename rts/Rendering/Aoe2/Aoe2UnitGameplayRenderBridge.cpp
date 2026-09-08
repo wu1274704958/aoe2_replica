@@ -66,6 +66,7 @@ struct UnitDefMapping {
 	std::uint8_t fixedPlayerColor = 1;
 	bool useTeamColor = true;
 	bool hideNativeModel = true;
+	bool building = false;
 	bool configured = false;
 	bool usable = false;
 };
@@ -252,7 +253,14 @@ void Aoe2GameplayBridgeImpl::ParseMappings()
 		if (unitDef.id <= 0 || static_cast<std::size_t>(unitDef.id) >= mappings.size())
 			continue;
 
-		const std::string* resourceId = FindParam(unitDef, "aoe2_unit_id");
+		const std::string* unitResourceId = FindParam(unitDef, "aoe2_unit_id");
+		const std::string* buildingResourceId = FindParam(unitDef, "aoe2_building_id");
+		if (unitResourceId != nullptr && buildingResourceId != nullptr) {
+			LOG_L(L_ERROR, "[Aoe2GameplayBridge] UnitDef %s defines both aoe2_unit_id and aoe2_building_id; keeping native model",
+				unitDef.name.c_str());
+			continue;
+		}
+		const std::string* resourceId = (buildingResourceId != nullptr) ? buildingResourceId : unitResourceId;
 		if (resourceId == nullptr || resourceId->empty())
 			continue;
 
@@ -262,6 +270,7 @@ void Aoe2GameplayBridgeImpl::ParseMappings()
 		mapping.groundOffset = ParseFloatParam(unitDef, "aoe2_ground_offset", 0.0f, -128.0f, 128.0f);
 		mapping.animationSpeed = ParseFloatParam(unitDef, "aoe2_animation_speed", 1.0f, 0.05f, 8.0f);
 		mapping.hideNativeModel = ParseBoolParam(unitDef, "aoe2_hide_native_model", true);
+		mapping.building = (buildingResourceId != nullptr);
 		mapping.configured = true;
 
 		if (unitDef.NumWeapons() > 1) {
@@ -298,10 +307,13 @@ void Aoe2GameplayBridgeImpl::PrepareAppearances()
 		auto& mapping = mappings[unitDefId];
 		if (!mapping.configured)
 			continue;
-		mapping.appearance = CAoe2UnitRenderer::PreloadAppearance(mapping.resourceId);
+		mapping.appearance = mapping.building
+			? CAoe2UnitRenderer::PreloadBuildingAppearance(mapping.resourceId)
+			: CAoe2UnitRenderer::PreloadAppearance(mapping.resourceId);
 		mapping.usable = static_cast<bool>(mapping.appearance);
 		if (!mapping.usable) {
-			LOG_L(L_WARNING, "[Aoe2GameplayBridge] AOE2 resource %s for UnitDef %u is unavailable; keeping native model",
+			LOG_L(L_WARNING, "[Aoe2GameplayBridge] AOE2 %s resource %s for UnitDef %u is unavailable; keeping native model",
+				mapping.building ? "building" : "unit",
 				mapping.resourceId.c_str(), static_cast<unsigned>(unitDefId));
 		}
 	}
@@ -445,7 +457,7 @@ bool Aoe2GameplayBridgeImpl::AddUnit(const CUnit* unit, std::uintptr_t token)
 	desc.position.y += mapping.groundOffset;
 	desc.headingRadians = static_cast<float>(unit->heading) * HEADING_TO_RADIANS;
 	desc.scale = mapping.scale;
-	desc.animation = Aoe2UnitAnimationSlot::IdleA;
+	desc.animation = mapping.building ? Aoe2UnitAnimationSlot::Built : Aoe2UnitAnimationSlot::IdleA;
 	desc.animationTime = 0.0f;
 	desc.playbackSpeed = 0.0f;
 	desc.playerColor = PlayerColorForUnit(*unit, mapping);
@@ -495,11 +507,20 @@ bool Aoe2GameplayBridgeImpl::AddFeature(const CFeature* feature, const Lifecycle
 	}
 
 	if (!instance) {
-		const auto resourceParam = feature->def->customParams.find("aoe2_unit_id");
+		const auto unitResourceParam = feature->def->customParams.find("aoe2_unit_id");
+		const auto buildingResourceParam = feature->def->customParams.find("aoe2_building_id");
+		if (unitResourceParam != feature->def->customParams.end() && buildingResourceParam != feature->def->customParams.end()) {
+			LOG_L(L_ERROR, "[Aoe2GameplayBridge] FeatureDef %s defines both aoe2_unit_id and aoe2_building_id",
+				feature->def->name.c_str());
+			return false;
+		}
+		const auto resourceParam = (buildingResourceParam != feature->def->customParams.end())
+			? buildingResourceParam : unitResourceParam;
 		if (resourceParam == feature->def->customParams.end())
 			return false;
+		const bool building = (buildingResourceParam != feature->def->customParams.end());
 		for (std::size_t i = 1; i < mappings.size(); ++i) {
-			if (mappings[i].usable && mappings[i].resourceId == resourceParam->second) {
+			if (mappings[i].usable && mappings[i].building == building && mappings[i].resourceId == resourceParam->second) {
 				mappingIndex = static_cast<std::uint32_t>(i);
 				break;
 			}
@@ -507,6 +528,7 @@ bool Aoe2GameplayBridgeImpl::AddFeature(const CFeature* feature, const Lifecycle
 		if (mappingIndex == 0) {
 			UnitDefMapping featureMapping;
 			featureMapping.resourceId = resourceParam->second;
+			featureMapping.building = building;
 			featureMapping.configured = true;
 			featureMapping.hideNativeModel = true;
 			const auto parseFloat = [feature](const char* name, float defaultValue, float minValue, float maxValue) {
@@ -520,7 +542,9 @@ bool Aoe2GameplayBridgeImpl::AddFeature(const CFeature* feature, const Lifecycle
 			featureMapping.scale = parseFloat("aoe2_scale", 1.0f, 0.01f, 16.0f);
 			featureMapping.groundOffset = parseFloat("aoe2_ground_offset", 0.0f, -128.0f, 128.0f);
 			featureMapping.animationSpeed = parseFloat("aoe2_animation_speed", 1.0f, 0.05f, 8.0f);
-			featureMapping.appearance = CAoe2UnitRenderer::PreloadAppearance(featureMapping.resourceId);
+			featureMapping.appearance = featureMapping.building
+				? CAoe2UnitRenderer::PreloadBuildingAppearance(featureMapping.resourceId)
+				: CAoe2UnitRenderer::PreloadAppearance(featureMapping.resourceId);
 			featureMapping.usable = static_cast<bool>(featureMapping.appearance);
 			if (!featureMapping.usable)
 				return false;
@@ -535,7 +559,7 @@ bool Aoe2GameplayBridgeImpl::AddFeature(const CFeature* feature, const Lifecycle
 		desc.position.y += mapping.groundOffset;
 		desc.headingRadians = static_cast<float>(feature->heading) * HEADING_TO_RADIANS;
 		desc.scale = mapping.scale;
-		desc.animation = Aoe2UnitAnimationSlot::DeathA;
+		desc.animation = mapping.building ? Aoe2UnitAnimationSlot::Destruction : Aoe2UnitAnimationSlot::DeathA;
 		desc.playerColor = playerColor;
 		desc.visible = false;
 		instance = CAoe2UnitRenderer::CreateInstance(desc);
@@ -550,7 +574,13 @@ bool Aoe2GameplayBridgeImpl::AddFeature(const CFeature* feature, const Lifecycle
 	featureSlot.mappingIndex = mappingIndex;
 	featureSlot.playerColor = playerColor;
 	activeFeatureIds.push_back(static_cast<std::uint32_t>(feature->id));
-	CAoe2UnitRenderer::SetAnimation(instance, Aoe2UnitAnimationSlot::DeathA, 0.0f, 0.0f);
+	const auto& mapping = mappings[mappingIndex];
+	CAoe2UnitRenderer::SetAnimation(
+		instance,
+		mapping.building ? Aoe2UnitAnimationSlot::Destruction : Aoe2UnitAnimationSlot::DeathA,
+		0.0f,
+		0.0f
+	);
 	diagnostics.liveInstances = static_cast<std::uint32_t>(activeUnitIds.size() + activeFeatureIds.size());
 	if (configHandler->GetBool("Aoe2UnitGameplayDiagnostics")) {
 		LOG_L(L_INFO,
@@ -619,6 +649,56 @@ void Aoe2GameplayBridgeImpl::UpdateUnit(std::uint32_t unitId, CUnit* unit, float
 {
 	auto& slot = slots[unitId];
 	const auto& mapping = mappings[unit->unitDef->id];
+	if (mapping.building) {
+		const bool gameplayAttacking = unit->IsAttackAnimationActive();
+		const int gameplayAttackStartFrame = unit->GetAttackMotionStartFrame();
+		const bool newAttack = gameplayAttacking && (
+			!slot.attacking || slot.attackStartFrame != gameplayAttackStartFrame
+		);
+		if (newAttack) {
+			slot.attackStartFrame = gameplayAttackStartFrame;
+			slot.animationTime = 0.0f;
+		}
+		if (!gameplayAttacking && slot.attacking) {
+			slot.attackStartFrame = -1;
+			slot.animationTime = 0.0f;
+		}
+		slot.attacking = gameplayAttacking;
+
+		Aoe2UnitAnimationSlot animation = Aoe2UnitAnimationSlot::Built;
+		float alpha = 1.0f;
+		if (unit->beingBuilt) {
+			Aoe2UnitAnimationInfo constructionInfo;
+			if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::Construction, constructionInfo))
+				animation = Aoe2UnitAnimationSlot::Construction;
+			alpha = std::clamp(unit->buildProgress, 0.15f, 1.0f);
+		} else if (slot.attacking) {
+			Aoe2UnitAnimationInfo attackInfo;
+			if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::BuildingAttack, attackInfo)) {
+				animation = Aoe2UnitAnimationSlot::BuildingAttack;
+				slot.animationTime = std::min(
+					std::max(0.0f, (static_cast<float>(gs->frameNum - slot.attackStartFrame) + globalRendering->timeOffset) *
+						INV_GAME_SPEED * mapping.animationSpeed),
+					attackInfo.durationSeconds
+				);
+			}
+		}
+
+		float3 position = unit->drawPos;
+		position.y += mapping.groundOffset;
+		CAoe2UnitRenderer::SetTransform(
+			slot.instance, position, static_cast<float>(unit->heading) * HEADING_TO_RADIANS, mapping.scale);
+		CAoe2UnitRenderer::SetAnimation(slot.instance, animation, slot.animationTime, 0.0f);
+		CAoe2UnitRenderer::SetTint(
+			slot.instance, 0x00FFFFFFu | (static_cast<std::uint32_t>(std::lround(alpha * 255.0f)) << 24u));
+		const std::uint8_t playerColor = PlayerColorForUnit(*unit, mapping);
+		if (playerColor != slot.playerColor) {
+			CAoe2UnitRenderer::SetPlayerColor(slot.instance, playerColor);
+			slot.playerColor = playerColor;
+		}
+		CAoe2UnitRenderer::SetVisible(slot.instance, slot.nativeModelVisible);
+		return;
+	}
 	const float horizontalSpeed = std::sqrt(unit->speed.x * unit->speed.x + unit->speed.z * unit->speed.z);
 	const bool wasWalking = slot.walking;
 	if (slot.walking) {
@@ -693,8 +773,31 @@ void Aoe2GameplayBridgeImpl::UpdateFeature(std::uint32_t featureId, CFeature* fe
 	const auto& mapping = mappings[slot.mappingIndex];
 	const float renderFrame = static_cast<float>(gs->frameNum) + globalRendering->timeOffset;
 	const float deathTime = std::max(0.0f, (renderFrame - feature->creationFrame) * INV_GAME_SPEED * mapping.animationSpeed);
+	Aoe2UnitAnimationSlot animation = Aoe2UnitAnimationSlot::DeathA;
+	float animationTime = deathTime;
 	Aoe2UnitAnimationInfo deathInfo;
-	CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::DeathA, deathInfo);
+	if (mapping.building) {
+		animation = Aoe2UnitAnimationSlot::Destruction;
+		if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, animation, deathInfo)) {
+			animationTime = std::min(deathTime, deathInfo.durationSeconds);
+			if (deathTime >= deathInfo.durationSeconds) {
+				Aoe2UnitAnimationInfo rubbleInfo;
+				if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::Rubble, rubbleInfo)) {
+					animation = Aoe2UnitAnimationSlot::Rubble;
+					animationTime = 0.0f;
+				}
+			}
+		} else {
+			Aoe2UnitAnimationInfo rubbleInfo;
+			if (CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, Aoe2UnitAnimationSlot::Rubble, rubbleInfo)) {
+				animation = Aoe2UnitAnimationSlot::Rubble;
+				animationTime = 0.0f;
+			}
+		}
+	} else {
+		CAoe2UnitRenderer::GetAnimationInfo(mapping.appearance, animation, deathInfo);
+		animationTime = std::min(deathTime, deathInfo.durationSeconds);
+	}
 
 	float fade = 1.0f;
 	if (feature->aoe2DecayStartFrame >= 0 && renderFrame > feature->aoe2DecayStartFrame) {
@@ -714,8 +817,8 @@ void Aoe2GameplayBridgeImpl::UpdateFeature(std::uint32_t featureId, CFeature* fe
 	);
 	CAoe2UnitRenderer::SetAnimation(
 		slot.instance,
-		Aoe2UnitAnimationSlot::DeathA,
-		std::min(deathTime, deathInfo.durationSeconds),
+		animation,
+		animationTime,
 		0.0f
 	);
 	CAoe2UnitRenderer::SetTint(slot.instance, 0x00FFFFFFu | (static_cast<std::uint32_t>(alpha) << 24u));

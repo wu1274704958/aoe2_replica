@@ -130,6 +130,51 @@ return {
 				{ name = "AOE_CAMEL_SCOUT_MELEE" },
 			},
 		},
+		aoe_afri_tower_age2 = {
+			name = "AOE African Age II Tower",
+			description = "Native Recoil CBuilding with an AOE2 tower appearance",
+			objectName = "fir_tree_smallest.s3o",
+			script = "aoe_afri_tower_age2.lua",
+			explodeAs = "NOWEAPON",
+			selfDestructAs = "NOWEAPON",
+			category = "BUILDING LAND",
+			footprintX = 2,
+			footprintZ = 2,
+			yardMap = "oooo",
+			levelGround = true,
+			collisionVolumeType = "CylY",
+			-- The x2 tower sprite occupies approximately 141 x 268 world units at
+			-- Aoe2UnitPixelsToWorld=0.55.  Keep a small visual margin while making
+			-- the native hit volume match the tower shaft rather than the old tree.
+			collisionVolumeScales = "120 240 120",
+			maxDamage = 800,
+			buildCostMetal = 1,
+			buildTime = 1,
+			power = 1,
+			mass = 100000,
+			canMove = false,
+			canAttack = true,
+			canFireControl = true,
+			corpse = "aoe_afri_tower_age2_rubble",
+			sightDistance = 650,
+			upright = true,
+			customParams = {
+				aoe2_building_id = "b_afri_tower_age2",
+				aoe2_scale = "1.0",
+				aoe2_ground_offset = "0.0",
+				aoe2_player_color = "team",
+				aoe2_hide_native_model = "true",
+				-- DAT weapon_offset=(0,1,5), converted by the validated shared
+				-- profile (right=x*60, up=z*30, forward=y*60), then calibrated
+				-- in the building anchor preview (+41 Recoil world units on up).
+				aoe2_aim_local = "0 60 0",
+				aoe2_weapon1_muzzle_local = "0 191 60",
+				aoe2_weapon1_forward_local = "0 0 1",
+			},
+			weapons = {
+				{ name = "AOE_TOWER_ARROW" },
+			},
+		},
 		},
 	FeatureDefs = {
 		aoe_archer_dead = {
@@ -170,6 +215,24 @@ return {
 				aoe2_corpse_fade_frames = "60",
 			},
 		},
+		aoe_afri_tower_age2_rubble = {
+			description = "AOE tower rubble gameplay host",
+			object = "fir_tree_smallest.s3o",
+			blocking = true,
+			reclaimable = true,
+			resurrectable = 0,
+			smokeTime = 0,
+			health = 800,
+			metal = 1,
+			footprintX = 2,
+			footprintZ = 2,
+			customParams = {
+				aoe2_corpse = "true",
+				aoe2_building_id = "b_afri_tower_age2",
+				aoe2_corpse_hold_frames = "450",
+				aoe2_corpse_fade_frames = "150",
+			},
+		},
 	},
 	WeaponDefs = {
 		noweapon = {
@@ -200,6 +263,40 @@ return {
 			-- face the target before firing. 1820 legacy angle units is about 10°.
 			turret = false,
 			tolerance = 1820,
+			avoidFriendly = false,
+			collideFriendly = false,
+			avoidFeature = false,
+			collideFeature = false,
+			damage = { default = 5 },
+			aoeDamage = {
+				pierce = 5,
+			},
+			aoeUpgradeTags = { "archer" },
+			customParams = {
+				aoe2_projectile_id = "p_arrow",
+				aoe2_projectile_scale = "1.0",
+			},
+		},
+		aoe_tower_arrow = {
+			name = "Native tower arrow",
+			weaponType = "Cannon",
+			areaOfEffect = 8,
+			impactOnly = true,
+			impulseFactor = 0,
+			impulseBoost = 0,
+			range = 550,
+			reloadtime = 2,
+			windup = 0.5,
+			attackRecoveryTime = 0.5,
+			accuracy = 0,
+			sprayAngle = 0,
+			targetMoveError = 0,
+			weaponVelocity = 400,
+			gravityAffected = true,
+			-- Buildings use StaticMoveType and cannot turn their chassis. Keep the
+			-- archer's forward-only weapon unchanged; this separate WeaponDef lets
+			-- the tower acquire and fire at enemies in every horizontal direction.
+			turret = true,
 			avoidFriendly = false,
 			collideFriendly = false,
 			avoidFeature = false,

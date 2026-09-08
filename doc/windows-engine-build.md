@@ -156,3 +156,25 @@ Fight 队列保留结果；`[AOE Move Diagnostic] post-elimination` 用于确认
 
 `aoe_attack_cannot_move=0` 可用于普通单位兼容性对照，此时测试弓手沿用 Recoil 原生的
 移动与开火时序，不应进入攻击碰撞保护路径。该选项仅修改本地测试 UnitDef。
+
+### 运行 AOE 建筑桥接测试
+
+```powershell
+.\build-official-release\extract\spring-dev.exe `
+  --write-dir "$PWD\build-test-runtime" `
+  "$PWD\build-test-runtime\aoe-building-test.txt"
+```
+
+该场景会生成四座不同朝向的原生 `CBuilding`（`b_afri_tower_age2`），并显示脚点、
+瞄准点、武器发射点和原生碰撞体。按 `B` 可在地图边缘生成一名敌方弓手，并以原生
+`CMD.FIGHT` 向四座塔的中心前进；塔使用专用的 360° `aoe_tower_arrow` 自动攻击（弓手的
+前向 `aoe_arrow` 不受影响）。建筑死亡后由对应的
+`CFeature` 接管 AOE Sprite，依次播放 destruction、rubble 和程序化淡出。
+
+该场景也可用于建筑锚点校准：`Tab` 选择塔，`Up`/`Down` 选择参数，`Left`/`Right`
+调整，`Shift` 为十倍步长，`R` 恢复 Def 值并清除 runtime muzzle override，`E` 将
+审阅用 Lua override 复制到剪贴板并保存至 `LuaUI/Config/AOEAnchorCalibration/`。只有
+muzzle 与 Sprite 像素缩放会实时作用；aim、forward 和碰撞体尺寸始终是青色本地预览，
+不修改同步 Gameplay 或 UnitDef。场景还会以 `Aoe2UnitMainCameraBias = 8.0` 将主体 Sprite
+轻微朝摄像机推开，避免脚点以下的塔底像素被地形三角面裁剪。紫色线框以运行时 `midPos + collisionVolumeOffset`
+计算，和原生 `/debugcolvol` 使用相同基准。
