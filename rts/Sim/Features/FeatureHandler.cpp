@@ -171,7 +171,7 @@ CFeature* CFeatureHandler::CreateWreckage(const FeatureLoadParams& cparams)
 	if (!eventHandler.AllowFeatureCreation(fd, cparams.teamID, cparams.pos))
 		return nullptr;
 
-	if (fd->modelName.empty())
+	if (fd->modelName.empty() && !fd->UsesAoeLogicalModel())
 		return nullptr;
 
 	FeatureLoadParams params = cparams;
@@ -294,4 +294,3 @@ void CFeatureHandler::TerrainChanged(int x1, int y1, int x2, int y2)
 		}
 	}
 }
-
