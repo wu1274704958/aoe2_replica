@@ -1,25 +1,43 @@
-# Windows Engine 构建脚本
+# Windows Engine 构建指南
 
-`tools/windows-engine-build.ps1` 用于在 Windows 本机重新构建 RecoilEngine 的
-`engine-legacy`，并生成测试场景使用的 `spring-dev.exe`。
+本文从一个**没有 CMake build cache** 的全新 Windows 工作副本开始，构建
+RecoilEngine 的 `engine-legacy`，并说明如何得到可启动的运行目录。AOE 双队
+Attack Move 场景的启动与参数说明见
+[`aoe_double_team_attack_move_test.md`](aoe_double_team_attack_move_test.md)。
 
-脚本默认执行完整的目标清理和重编译。当前 MinGW/Ninja 构建目录曾出现头文件依赖未被
-记录的问题；修改 `UnitDef`、`CUnit`、`WeaponDef`、`CWeapon` 等 C++ 类型布局后，普通
-增量编译可能把新旧对象文件链接进同一个程序，造成随机越界或崩溃。因此日常验证布局
-相关修改时应保留默认的 clean 模式。
+## 0. 获取完整源码
 
-## 前置条件
+在仓库根目录执行以下命令，确保所有子模块已经取回：
 
-- Windows PowerShell 5.1 或 PowerShell 7；
-- CMake 和 Ninja 可从 `PATH` 找到；
-- MinGW 编译器及 `strip.exe` 可用；
-- 已准备 `mingwlibs64`；
-- 已存在配置完成的 CMake 构建目录，默认是 `build-mingw`；
-- 运行目录中已有 RecoilEngine 所需 DLL。当前开发环境使用
-  `build-official-release/extract`，其中的 DLL 来自官方 Release 包。
+```powershell
+git submodule update --init --recursive
+```
 
-如果还没有构建目录，可在仓库根目录进行一次配置。下面的命令适用于当前 Strawberry
-MinGW 环境；使用其他工具链时应相应调整编译器路径：
+构建前关闭所有正在运行的 `spring*.exe`，否则 Windows 可能锁住待替换的可执行文件。
+以下示例均从仓库根目录执行，并且每种工具链使用自己的 build 目录；不要让不同
+generator 复用同一个目录。
+
+## 1. 推荐：本机 MinGW + Ninja
+
+这是 `tools/windows-engine-build.ps1` 所支持的开发路径。它要求：
+
+- CMake 3.27 或更高版本；
+- Ninja、64 位 MinGW GCC/G++ 和 `strip.exe` 均可从 `PATH` 找到；
+- 与工具链匹配的 `mingwlibs64` 依赖目录（含 `include`、`lib`、`dll`）。默认可放在
+  仓库根目录，也可由环境变量 `MINGWLIBS` 或 `-DMINGWLIBS` 指向其它位置；
+- 用于实际启动的运行时 DLL。开发环境可将官方 Windows Release 解压到任意目录，作为
+  下文的运行目录；构建脚本只更新 EXE，不下载或覆盖 DLL。
+
+先检查工具链：
+
+```powershell
+cmake --version
+ninja --version
+g++ --version
+strip --version
+```
+
+### 首次配置（不依赖已有 cache）
 
 ```powershell
 cmake -S . -B build-mingw -G Ninja `
@@ -28,153 +46,141 @@ cmake -S . -B build-mingw -G Ninja `
   -DBUILD_spring-legacy=ON
 ```
 
-## 默认构建
+若依赖位于其它位置，只替换 `-DMINGWLIBS` 的绝对路径。配置成功后应存在
+`build-mingw\CMakeCache.txt`；它是下一步构建脚本的输入，而不是前置假设。
 
-在仓库根目录执行：
-
-```powershell
-pwsh -File .\tools\windows-engine-build.ps1
-```
-
-如果系统没有 `pwsh`，可使用 Windows PowerShell：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\windows-engine-build.ps1
-```
-
-默认流程为：
-
-1. 校验 `build-mingw/CMakeCache.txt` 属于当前仓库；
-2. 以 clean 模式完整构建 `engine-legacy`；
-3. 保留带调试信息的 `build-mingw/spring.exe`；
-4. 使用 CMake 配置的 `strip.exe` 生成尺寸较小、Windows 可加载的
-   `build-official-release/extract/spring-dev.exe`；
-5. 执行一次 `--version` 启动检查；
-6. 启动检查成功后才替换旧的 `spring-dev.exe`。
-
-## 常用参数
-
-指定并行任务数：
-
-```powershell
-pwsh -File .\tools\windows-engine-build.ps1 -Jobs 8
-```
-
-指定其他构建目录或运行目录：
+### 构建并部署到运行目录
 
 ```powershell
 pwsh -File .\tools\windows-engine-build.ps1 `
-  -BuildDirectory D:\build\recoil-mingw `
-  -RuntimeDirectory D:\runtime\recoil
+  -BuildDirectory build-mingw `
+  -RuntimeDirectory D:\runtime\recoil-dev
 ```
 
-仅在没有修改任何会影响 C++ 类型布局的头文件时，才建议使用增量模式：
+如果系统只有 Windows PowerShell：
 
 ```powershell
-pwsh -File .\tools\windows-engine-build.ps1 -Incremental
+powershell -ExecutionPolicy Bypass -File .\tools\windows-engine-build.ps1 `
+  -BuildDirectory build-mingw `
+  -RuntimeDirectory D:\runtime\recoil-dev
 ```
 
-诊断用途参数：
+首次使用前，`D:\runtime\recoil-dev` 应已包含与该 MinGW 构建兼容的 Release 运行时
+DLL（例如 `SDL2.dll`、`OpenAL32.dll` 等）。可先把官方 Release 的解压内容复制到该目录。
+脚本会：
 
-- `-SkipStrip`：直接复制未剥离的程序。当前 MinGW 调试程序可能过大并被 Windows 拒绝
-  加载，因此通常不要使用。
-- `-SkipVersionCheck`：跳过生成程序的启动检查。
-- `-OutputName <name.exe>`：修改运行程序文件名。
+1. 校验 cache 归属当前源码树；
+2. 默认以 `--clean-first` 构建 `engine-legacy`；
+3. 保留 `build-mingw\spring.exe` 的未剥离版本；
+4. 用当前工具链的 `strip` 生成 `<RuntimeDirectory>\spring-dev.exe`；
+5. 用 `--version` 验证新 EXE 可以启动后才替换旧文件。
 
-## 运行 AOE 测试场景
-
-构建成功后执行：
+头文件或 C++ 类型布局（例如 `UnitDef`、`CUnit`、`WeaponDef`、`CWeapon`）变动后必须
+保留默认 clean 构建，避免旧对象文件混入。仅在确认没有此类变动时才使用：
 
 ```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\_script.txt"
+pwsh -File .\tools\windows-engine-build.ps1 -BuildDirectory build-mingw -Incremental -Jobs 8
 ```
 
-`_script.txt` 默认同时设置 `aoe_fixed_test_camera=1` 和
-`aoe_orthographic_test_camera=1`。双队 Gameplay 测试使用真实正交投影、45° 俯角，
-并通过 `orthoHeight` 保持原长焦测试相机的画面范围。将正交选项设为 `0` 可回到
-5° 透视长焦用于 A/B 对比；将固定相机选项设为 `0` 可恢复引擎默认相机。启用时还会按相机高度和地图尺寸为
-`FeatureDrawDistance`、`FeatureFadeDistance` 设置仅当前运行有效的内存覆盖，确保
-AOE 尸体 Feature 的 `DeathA` 和程序化 `Decay` 可见；该覆盖不会写入
-`springsettings.cfg`。
+`-SkipStrip` 与 `-SkipVersionCheck` 仅用于诊断；正常 Windows 验证不建议使用。
 
-正交相机的 CameraState 字段、Lua 像素射线接口和交互注意事项参见
-`doc/orthographic-camera.md`。
+## 2. 没有 MinGW 时的选择
 
-若提示缺少 `SDL2.dll`、`OpenAL32.dll` 等文件，应检查
-`build-official-release/extract` 是否包含官方 Release 的运行时 DLL。构建脚本只替换
-`spring-dev.exe`，不会覆盖或重新分发这些第三方运行时文件。
+### 2.1 安装或准备 MinGW（建议长期本机开发时使用）
 
-### 运行 AOE 锚点校准场景
+安装 64 位 MinGW-w64 GCC、Ninja 和 CMake，并将其 `bin` 目录加入 `PATH`。依赖不能只靠
+编译器本身：还需要取得与该工具链兼容的 `mingwlibs64`，将其置于仓库根目录或设置
+`MINGWLIBS` 环境变量。然后回到“首次配置”，从零生成 `build-mingw`。
 
-远程单位锚点校准使用独立启动脚本，不应通过运行后自动生成的 `_script.txt` 启用：
+不要把 MSVC 的 `vclibs64` 用给 MinGW，也不要把 MSVC 编译出的 EXE 与 MinGW Release 的
+DLL 混用。
+
+### 2.2 MSVC 手工构建（本机 MinGW 的替代方案）
+
+安装 Visual Studio 2022 或 Build Tools，并勾选“使用 C++ 的桌面开发”。从 *x64 Native
+Tools Command Prompt for VS 2022* 或已初始化的开发者 PowerShell 执行：
 
 ```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\aoe-anchor-calibration-test.txt"
+cmake -S . -B build-msvc -G "Visual Studio 17 2022" -A x64 `
+  -DMINGWLIBS="$PWD\vclibs64" `
+  -DBUILD_spring-legacy=ON
+cmake --build build-msvc --config RelWithDebInfo --target engine-legacy --parallel
 ```
 
-该场景固定生成 16 个方向的 `aoe_archer`，详细操作和导出边界参见
-`doc/aoe_anchor_calibration.md`。
-
-### 运行 Camel Scout 近战测试
-
-全方向近战碰撞、射程和伤害帧校准：
+MSVC 是 multi-config generator，`spring.exe` 通常位于
+`build-msvc\RelWithDebInfo\spring.exe`（如目录布局不同，可搜索
+`Get-ChildItem build-msvc -Filter spring.exe -Recurse`）。当前
+`windows-engine-build.ps1` 专为单配置 MinGW/Ninja 目录和 MinGW `strip` 设计，**不要**
+将 MSVC build 目录交给它。应手工建立一个只含 MSVC 匹配 DLL 的运行目录，再复制 EXE：
 
 ```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\aoe-melee-calibration-test.txt"
+Copy-Item .\build-msvc\RelWithDebInfo\spring.exe D:\runtime\recoil-msvc\spring-dev.exe
+& D:\runtime\recoil-msvc\spring-dev.exe --version
 ```
 
-双队原生 `CMD.FIGHT` 实战：
+若 MSVC 依赖或运行时无法匹配，使用下方官方 Docker 路径；它是最可靠的干净环境回退。
+
+### 2.3 官方 Docker 构建（最可复现的回退）
+
+安装并启动 Docker Desktop，以及 Git for Windows（提供 Bash）；也可在 WSL2 内进行。原生
+Windows 文件系统上的容器编译较慢，WSL2 中应将源码 clone 到 Linux 文件系统内。
+
+从 Git Bash 或 WSL 的仓库根目录执行：
+
+```bash
+docker-build-v2/build.sh windows
+```
+
+脚本会拉取官方包含 MinGW、依赖和缓存配置的镜像，进行全新配置、编译并安装。可启动的
+完整输出位于：
+
+```text
+build-amd64-windows/install/
+```
+
+而不是 `build-amd64-windows/` 根目录。首次只检查配置可运行：
+
+```bash
+docker-build-v2/build.sh --configure windows
+```
+
+更多 Docker 参数见 `docker-build-v2/README.md`；例如 `-j 8` 限制并行度。
+
+## 3. 构建与运行问题排查
+
+- `Configured CMake build directory not found`：尚未执行首次 `cmake -S/-B`，或传给脚本的
+  `-BuildDirectory` 不对；重新配置，不要手写 cache。
+- `SDL2.dll was not found` / 缺少其它 DLL：编译成功不代表运行目录完整。将同一工具链的
+  Release 运行时 DLL 放在 `spring-dev.exe` 旁；不要从不同工具链拼凑 DLL。
+- `spring-dev.exe` 不能替换、清理失败：退出所有 Spring 进程、关闭被占用的日志查看器后重试。
+- CMake 找不到依赖：确认 `MINGWLIBS` 指向正确的工具链依赖根目录；无法快速修复时转用
+  Docker，而不是在已有 build 目录中切换 generator。
+
+## 4. AOE 测试运行目录
+
+测试启动示例中的 `--write-dir` 可以是任意可写绝对目录；文档中的
+`build-test-runtime` 只是仓库内随测试场景提交的便携模板，不是引擎固定的本地目录。建议
+把它复制到例如 `D:\runtime\aoe-test-write-dir` 后使用该副本作为 write-dir，以免运行产生的
+缓存、日志和 UI 偏好污染源码树。完整运行方式、资源前置条件和双队参数见
+[`aoe_double_team_attack_move_test.md`](aoe_double_team_attack_move_test.md)。
+
+## 5. 其它 AOE 专项场景
+
+下面的启动文件也在便携测试模板内。将 `$engine` 和 `$writeDir` 替换为实际路径即可；
+不要假定 write-dir 位于源码树内。
 
 ```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\aoe-melee-gameplay-test.txt"
+$engine = "D:\runtime\recoil-dev\spring-dev.exe"
+$writeDir = "D:\runtime\aoe-test-write-dir"
+& $engine --write-dir $writeDir "$writeDir\aoe-anchor-calibration-test.txt"
 ```
 
-交互方式、Def 换算、运行时覆盖边界和期望伤害时序参见
-`doc/aoe_melee_calibration.md`。
+- `aoe-anchor-calibration-test.txt`：16 方向远程单位锚点校准，详见
+  `doc/aoe_anchor_calibration.md`。
+- `aoe-melee-calibration-test.txt`：Camel Scout 全方向碰撞、射程和伤害帧校准；
+  `aoe-melee-gameplay-test.txt`：双队近战原生 `CMD.FIGHT`。
+- `aoe-attack-regression-test.txt`：8v1 的 `attackCannotMove` 专项回归；可通过
+  `aoe_explicit_move_regression` 验证显式 Move 在 Windup/Recovery 取消攻击。
+- `aoe-building-test.txt`：四个方向的原生 AOE 箭塔、锚点/碰撞预览和塔 Projectile 验证。
 
-### 运行 attackCannotMove 专项回归
-
-```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\aoe-attack-regression-test.txt"
-```
-
-该启动脚本使用 8v1 快速交战场景，并启用 `aoe_explicit_move_regression`。日志中的
-`[AOE Attack Regression]` 会分别报告 Windup/Recovery 显式 Move 取消、目标死亡后的
-Fight 队列保留结果；`[AOE Move Diagnostic] post-elimination` 用于确认恢复行进并在实际
-到达后正常清空命令队列。`[AOE Position Diagnostic] collision-lock audit` 的
-`displacementViolations` 应保持为 0。
-
-`aoe_attack_cannot_move=0` 可用于普通单位兼容性对照，此时测试弓手沿用 Recoil 原生的
-移动与开火时序，不应进入攻击碰撞保护路径。该选项仅修改本地测试 UnitDef。
-
-### 运行 AOE 建筑桥接测试
-
-```powershell
-.\build-official-release\extract\spring-dev.exe `
-  --write-dir "$PWD\build-test-runtime" `
-  "$PWD\build-test-runtime\aoe-building-test.txt"
-```
-
-该场景会生成四座不同朝向的原生 `CBuilding`（`b_afri_tower_age2`），并显示脚点、
-瞄准点、武器发射点和原生碰撞体。按 `B` 可在地图边缘生成一名敌方弓手，并以原生
-`CMD.FIGHT` 向四座塔的中心前进；塔使用专用的 360° `aoe_tower_arrow` 自动攻击（弓手的
-前向 `aoe_arrow` 不受影响）。建筑死亡后由对应的
-`CFeature` 接管 AOE Sprite，依次播放 destruction、rubble 和程序化淡出。
-
-该场景也可用于建筑锚点校准：`Tab` 选择塔，`Up`/`Down` 选择参数，`Left`/`Right`
-调整，`Shift` 为十倍步长，`R` 恢复 Def 值并清除 runtime muzzle override，`E` 将
-审阅用 Lua override 复制到剪贴板并保存至 `LuaUI/Config/AOEAnchorCalibration/`。只有
-muzzle 与 Sprite 像素缩放会实时作用；aim、forward 和碰撞体尺寸始终是青色本地预览，
-不修改同步 Gameplay 或 UnitDef。场景使用 `Aoe2UnitBelowFootCameraBiasScale = 1.0`：渲染器仅将
-每帧脚点以下的 Sprite 像素渐进地朝摄像机推开，偏移量随该帧脚点以下的实际像素高度自动缩放，避免塔底被地形三角面裁剪而不使主体整体漂移。紫色线框以运行时 `midPos + collisionVolumeOffset`
-计算，和原生 `/debugcolvol` 使用相同基准。
+这些专项模式不要与双队 Attack Move 的 `_script.txt` 混用。

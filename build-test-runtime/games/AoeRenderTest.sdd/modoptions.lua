@@ -17,6 +17,12 @@ return {
 		type = "bool",
 		def = false,
 	},
+	aoe_team_towers = {
+		name = "AOE formation towers",
+		desc = "Place one native AOE tower behind each standard battle formation",
+		type = "bool",
+		def = false,
+	},
 	aoe_anchor_calibration = {
 		name = "AOE anchor calibration",
 		desc = "Spawn the static all-direction AOE remote-unit anchor calibration scene",

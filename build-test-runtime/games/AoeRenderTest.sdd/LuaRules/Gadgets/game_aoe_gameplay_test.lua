@@ -67,6 +67,7 @@ local globalLosForTeamA = ReadBooleanOption("aoe_global_los", true)
 local anchorValidation = ReadBooleanOption("aoe_anchor_validation", false)
 local anchorCalibration = ReadBooleanOption("aoe_anchor_calibration", false)
 local buildingTest = ReadBooleanOption("aoe_building_test", false)
+local teamTowersEnabled = ReadBooleanOption("aoe_team_towers", false)
 local meleeCalibration = ReadBooleanOption("aoe_melee_calibration", false)
 local meleeBattle = ReadBooleanOption("aoe_melee_battle", false)
 local positionDiagnosticEnabled = ReadBooleanOption("aoe_position_diagnostics", true)
@@ -129,6 +130,9 @@ local teams = {
 		units = {},
 	},
 }
+
+local TEAM_TOWER_NAME = "aoe_afri_tower_age2"
+local TEAM_TOWER_REAR_CLEARANCE = 120
 
 local anchorTest = {
 	targetID = nil,
@@ -266,6 +270,28 @@ local function SpawnFormation(team)
 		createdCamelCount, requestedCamelCount, createdArcherCount,
 		team.center.x, team.center.z,
 		dimensions.columns, dimensions.rows
+	))
+end
+
+local function SpawnTeamTower(team)
+	if not teamTowersEnabled then
+		return
+	end
+
+	local rearDirection = (team.facing == "east") and -1 or 1
+	local x = team.center.x + rearDirection * (team.dimensions.width * 0.5 + TEAM_TOWER_REAR_CLEARANCE)
+	local z = team.center.z
+	x = math.max(64, math.min(Game.mapSizeX - 64, x))
+	z = math.max(64, math.min(Game.mapSizeZ - 64, z))
+
+	local towerID = Spring.CreateUnit(TEAM_TOWER_NAME, x, Spring.GetGroundHeight(x, z), z, team.facing, team.teamID)
+	if towerID == nil then
+		error(string.format("[AOE Gameplay Test] failed to create Team %s tower", team.name))
+	end
+
+	Spring.Echo(string.format(
+		"[AOE Gameplay Test] Team %s tower=%d rearPosition=(%.1f, %.1f)",
+		team.name, towerID, x, z
 	))
 end
 
@@ -975,6 +1001,8 @@ function gadget:GameStart()
 
 	SpawnFormation(teams[1])
 	SpawnFormation(teams[2])
+	SpawnTeamTower(teams[1])
+	SpawnTeamTower(teams[2])
 	InitializePositionDiagnostic()
 	InitializeExplicitMoveRegression()
 	Spring.Echo(string.format("[AOE Gameplay Test] Team A/B allied=%s", tostring(Spring.AreTeamsAllied(teams[1].teamID, teams[2].teamID))))
