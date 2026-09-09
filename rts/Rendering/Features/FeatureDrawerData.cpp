@@ -26,6 +26,19 @@ CONFIG(float, FeatureFadeDistance)
 .minimumValue(0.0f)
 .description("Distance at which features will begin to fade from view.");
 
+static void GetFeatureCullBounds(const CFeature* feature, float3& center, float& radius)
+{
+	center = feature->drawMidPos;
+	radius = feature->GetDrawRadius();
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (feature->def != nullptr && feature->def->UsesAoeLogicalModel()) {
+		center = feature->drawPos;
+		radius = std::max(1.0f, feature->radius);
+	}
+	CAoe2UnitGameplayRenderBridge::GetNativeCullBounds(feature, center, radius);
+#endif
+}
+
 
 void CFeatureDrawerData::RenderFeaturePreCreated(const CFeature* feature)
 {
@@ -120,6 +133,9 @@ void CFeatureDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 
 	CFeature* f = static_cast<CFeature*>(o);
 	f->ResetDrawFlag();
+	float3 cullCenter;
+	float cullRadius;
+	GetFeatureCullBounds(f, cullCenter, cullRadius);
 
 	for (uint32_t camType = CCamera::CAMTYPE_PLAYER; camType < CCamera::CAMTYPE_ENVMAP; ++camType) {
 		if (camType == CCamera::CAMTYPE_UWREFL && !IWater::GetWater()->CanDrawReflectionPass())
@@ -139,7 +155,7 @@ void CFeatureDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 		if (!f->IsInLosForAllyTeam(gu->myAllyTeam) && !gu->spectatingFullView)
 			continue;
 
-		if (!cam->InView(f->drawMidPos, f->GetDrawRadius()))
+		if (!cam->InView(cullCenter, cullRadius))
 			continue;
 
 		switch (camType)
@@ -189,7 +205,7 @@ void CFeatureDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 				if (!f->HasDrawFlag(DrawFlags::SO_OPAQUE_FLAG) && !f->HasDrawFlag(DrawFlags::SO_ALPHAF_FLAG))
 					continue;
 
-				if (CModelDrawerHelper::ObjectVisibleReflection(f->drawMidPos, cam->GetPos(), f->GetDrawRadius()))
+				if (CModelDrawerHelper::ObjectVisibleReflection(cullCenter, cam->GetPos(), cullRadius))
 					f->AddDrawFlag(DrawFlags::SO_REFLEC_FLAG);
 			} break;
 

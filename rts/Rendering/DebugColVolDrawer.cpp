@@ -68,9 +68,13 @@ static inline void DrawCollisionVolume(const CollisionVolume* vol, const CMatrix
 			}
 			GL::shapes.DrawWireCylinder(20, m, color);
 		} break;
-		case CollisionVolume::COLVOL_TYPE_BOX: {
+		case CollisionVolume::COLVOL_TYPE_BOX:
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case CollisionVolume::COLVOL_TYPE_AOE_BOX:
+	#endif
+		{
 			// scaled cube: length, width, height
-			m.Translate(vol->GetOffset(0), vol->GetOffset(1), vol->GetOffset(2));
+			vol->ApplyLocalTransform(m);
 			m.Scale(vol->GetScale(0), vol->GetScale(1), vol->GetScale(2));
 			GL::shapes.DrawWireBox(m, color);
 		} break;

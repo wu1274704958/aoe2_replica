@@ -237,10 +237,13 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	collisionVolume.InitDefault(float4(model->radius, model->height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
 	selectionVolume.InitDefault(float4(model->radius, model->height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
 	if (unitDef->anchors.enabled) {
-		// CollisionVolume offsets are relative to the placeholder model's mid-position,
-		// whereas AOE anchors are relative to the sprite foot (unit pos).  Keep the
-		// physical collision centre on its explicitly configured local point.
-		collisionVolume.SetOffsets(unitDef->anchors.collisionLocal - model->relMidPos);
+		// CollisionVolume offsets are relative to the logical model's mid-position,
+		// whereas AOE anchors are relative to the sprite foot (unit pos). Keep the
+		// physical collision and selection centres on its explicitly configured
+		// local point. This keeps mouse selection aligned with projectile hits.
+		const float3 collisionOffset = unitDef->anchors.collisionLocal - model->relMidPos;
+		collisionVolume.SetOffsets(collisionOffset);
+		selectionVolume.SetOffsets(collisionOffset);
 	}
 
 
@@ -255,6 +258,13 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	UpdateDirVectors(!upright && IsOnGround(), false, 0.0f);
 	SetMidAndAimPos(model->relMidPos, unitDef->anchors.enabled ? unitDef->anchors.aimLocal : model->relMidPos, true);
 	SetRadiusAndHeight(model);
+	if (unitDef->UsesAoeLogicalModel()) {
+		const float logicalHeight = std::max(
+			1.0f,
+			collisionVolume.GetOffset(CollisionVolume::COLVOL_AXIS_Y) + collisionVolume.GetHScale(CollisionVolume::COLVOL_AXIS_Y)
+		);
+		SetRadiusAndHeight(collisionVolume.GetBoundingRadius(), logicalHeight);
+	}
 	UpdateMidAndAimPos();
 
 	buildeeRadius = (unitDef->buildeeBuildRadius >= 0.f) ? unitDef->buildeeBuildRadius : radius;

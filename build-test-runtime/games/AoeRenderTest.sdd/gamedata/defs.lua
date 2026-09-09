@@ -11,7 +11,6 @@ return {
 		aoe_archer = {
 			name = "AOE Gameplay Archer",
 			description = "Native Recoil Gameplay Unit with an AOE2 render appearance",
-			objectName = "fir_tree_smallest.s3o",
 			script = "aoe_archer.lua",
 			explodeAs = "NOWEAPON",
 			selfDestructAs = "NOWEAPON",
@@ -72,7 +71,6 @@ return {
 		aoe_camel_scout = {
 			name = "AOE Camel Scout",
 			description = "Native Recoil melee gameplay unit with an AOE2 render appearance",
-			objectName = "fir_tree_smallest.s3o",
 			script = "aoe_camel_scout.lua",
 			explodeAs = "NOWEAPON",
 			selfDestructAs = "NOWEAPON",
@@ -133,7 +131,6 @@ return {
 		aoe_afri_tower_age2 = {
 			name = "AOE African Age II Tower",
 			description = "Native Recoil CBuilding with an AOE2 tower appearance",
-			objectName = "fir_tree_smallest.s3o",
 			script = "aoe_afri_tower_age2.lua",
 			explodeAs = "NOWEAPON",
 			selfDestructAs = "NOWEAPON",
@@ -181,20 +178,19 @@ return {
 		aoe_west_castle_age3 = {
 			name = "AOE Western Age III Castle",
 			description = "Native Recoil CBuilding with an AOE2 western castle appearance",
-			objectName = "fir_tree_smallest.s3o",
 			script = "aoe_west_castle_age3.lua",
 			explodeAs = "NOWEAPON",
 			selfDestructAs = "NOWEAPON",
 			category = "BUILDING LAND",
-			-- The source DAT collision radii are (2, 2) and the display sprite is
-			-- about 385 world units wide at Aoe2UnitPixelsToWorld=0.55. Keep the
-			-- pathing footprint and the native hit volume consistent with that size.
+			-- The source Sprite has an isometric diamond-shaped base. AoeBox
+			-- rotates the local Box by the Lua-configured yaw; 283 ~= 400 / sqrt(2), preserving
+			-- the previous 400-unit world-space diagonal while matching the art.
 			footprintX = 6,
 			footprintZ = 6,
 			yardMap = "oooooooooooooooooooooooooooooooooooo",
 			levelGround = true,
-			collisionVolumeType = "Box",
-			collisionVolumeScales = "400 330 400",
+			collisionVolumeType = "AoeBox",
+			collisionVolumeScales = "266 330 283",
 			-- Source DAT Unit 82 (CSTL) has 4800 hit points, 11 LOS, range 8,
 			-- reload 2 s and graphic_displacement=(0, 1, 4). The uncalibrated
 			-- shared conversion is (right=x*60, up=z*30, front=y*60).
@@ -215,6 +211,7 @@ return {
 				aoe2_ground_offset = "0.0",
 				aoe2_player_color = "team",
 				aoe2_hide_native_model = "true",
+				aoe2_collision_yaw_degrees = "45",
 				aoe2_aim_local = "0 120 0",
 				aoe2_collision_local = "0 165 0",
 				aoe2_weapon1_muzzle_local = "0 120 60",
@@ -228,7 +225,6 @@ return {
 	FeatureDefs = {
 		aoe_archer_dead = {
 			description = "AOE archer corpse gameplay host",
-			object = "fir_tree_smallest.s3o",
 			blocking = true,
 			reclaimable = true,
 			resurrectable = 0,
@@ -247,7 +243,6 @@ return {
 		},
 		aoe_camel_scout_dead = {
 			description = "AOE camel scout corpse gameplay host",
-			object = "fir_tree_smallest.s3o",
 			blocking = true,
 			reclaimable = true,
 			resurrectable = 0,
@@ -266,7 +261,6 @@ return {
 		},
 		aoe_afri_tower_age2_rubble = {
 			description = "AOE tower rubble gameplay host",
-			object = "fir_tree_smallest.s3o",
 			blocking = true,
 			reclaimable = true,
 			resurrectable = 0,
@@ -284,7 +278,6 @@ return {
 		},
 		aoe_west_castle_age3_rubble = {
 			description = "AOE western castle rubble gameplay host",
-			object = "fir_tree_smallest.s3o",
 			blocking = true,
 			reclaimable = true,
 			resurrectable = 0,

@@ -16,6 +16,7 @@ CR_REG_METADATA(CollisionVolume, (
 	CR_IGNORED(halfAxisScalesSqr),
 	CR_IGNORED(halfAxisScalesInv),
 	CR_MEMBER(axisOffsets),
+	CR_MEMBER(localYaw),
 
 	CR_IGNORED(volumeBoundingRadius),
 	CR_IGNORED(volumeBoundingRadiusSq),
@@ -37,6 +38,7 @@ CollisionVolume& CollisionVolume::operator = (const CollisionVolume& v) {
 	halfAxisScalesSqr      = v.halfAxisScalesSqr;
 	halfAxisScalesInv      = v.halfAxisScalesInv;
 	axisOffsets            = v.axisOffsets;
+	localYaw               = v.localYaw;
 
 	volumeBoundingRadius   = v.volumeBoundingRadius;
 	volumeBoundingRadiusSq = v.volumeBoundingRadiusSq;
@@ -116,7 +118,7 @@ void CollisionVolume::InitShape(
 
 	// assign these here, since we can be
 	// called from outside the constructor
-	volumeType    = std::max(vType, 0) % (COLVOL_TYPE_SPHERE + 1);
+	volumeType    = std::max(vType, 0) % COLVOL_NUM_TYPES;
 	volumeAxes[0] = std::max(pAxis, 0) % (COLVOL_AXIS_Z + 1);
 
 	///< [0] is primary axis, [1] and [2] are secondary (all COLVOL_AXIS_*)
@@ -151,7 +153,11 @@ void CollisionVolume::SetBoundingRadius() {
 	//   this must be called manually after either
 	//   a call to SetAxisScales or to RescaleAxes
 	switch (volumeType) {
-		case COLVOL_TYPE_BOX: {
+		case COLVOL_TYPE_BOX:
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case COLVOL_TYPE_AOE_BOX:
+	#endif
+		{
 			// would be an over-estimation for cylinders
 			volumeBoundingRadiusSq = halfAxisScalesSqr.x + halfAxisScalesSqr.y + halfAxisScalesSqr.z;
 			volumeBoundingRadius = math::sqrt(volumeBoundingRadiusSq);
@@ -236,6 +242,17 @@ float3 CollisionVolume::GetWorldSpacePos(const CSolidObject* o, const float3& ex
 }
 
 
+void CollisionVolume::ApplyLocalTransform(CMatrix44f& matrix) const
+{
+	matrix.Translate(axisOffsets);
+
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (volumeType == COLVOL_TYPE_AOE_BOX)
+		matrix.RotateY(localYaw);
+#endif
+}
+
+
 
 float CollisionVolume::GetPointSurfaceDistance(const CUnit* u, const LocalModelPiece* lmp, const float3& pos) const {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -268,7 +285,7 @@ float CollisionVolume::GetPointSurfaceDistance(
 		vm.Translate(obj->relMidPos);
 	}
 
-	vm.Translate(GetOffsets());
+	ApplyLocalTransform(vm);
 	vm.InvertAffineInPlace();
 
 	return (GetPointSurfaceDistance(vm, pos));
@@ -284,7 +301,11 @@ float CollisionVolume::GetPointSurfaceDistance(const CMatrix44f& mv, const float
 	float d = 0.0f;
 
 	switch (volumeType) {
-		case COLVOL_TYPE_BOX: {
+		case COLVOL_TYPE_BOX:
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case COLVOL_TYPE_AOE_BOX:
+	#endif
+		{
 			// always clamp <pv> to box (!) surface
 			// (so minimum distance is always zero)
 			pv.x = ((int(pv.x >= 0.0f) * 2) - 1) * std::max(math::fabs(pv.x), halfAxisScales.x);
@@ -430,4 +451,3 @@ float CollisionVolume::GetEllipsoidDistance(const float3& pv) const
 
 	return currDist;
 }
-

@@ -59,6 +59,7 @@ if not gadgetHandler:IsSyncedCode() then
 		muzzle = { 0, 120, 60 },
 		forward = { 0, 0, 1 },
 		collisionScale = { 400, 330, 400 },
+		collisionYawDegrees = 45,
 		pixelScale = 0.55,
 	}
 	local controls = {
@@ -77,6 +78,7 @@ if not gadgetHandler:IsSyncedCode() then
 		{ label = "collision_scale.x", value = preview.collisionScale, index = 1, step = 1, minimum = 0.01 },
 		{ label = "collision_scale.y", value = preview.collisionScale, index = 2, step = 1, minimum = 0.01 },
 		{ label = "collision_scale.z", value = preview.collisionScale, index = 3, step = 1, minimum = 0.01 },
+		{ label = "collision_yaw_degrees", value = preview, key = "collisionYawDegrees", step = 1, minimum = -180, maximum = 180 },
 		{ label = "sprite_pixels_to_world", value = preview, key = "pixelScale", step = 0.01, minimum = 0.01, maximum = 10 },
 	}
 
@@ -119,6 +121,7 @@ if not gadgetHandler:IsSyncedCode() then
 		CopyVector(preview.collision, ParseVector(params.aoe2_collision_local, preview.aim))
 		CopyVector(preview.muzzle, ParseVector(params.aoe2_weapon1_muzzle_local, BASE_MUZZLE_LOCAL))
 		CopyVector(preview.forward, ParseVector(params.aoe2_weapon1_forward_local, { 0, 0, 1 }))
+		preview.collisionYawDegrees = tonumber(params.aoe2_collision_yaw_degrees) or 0
 		preview.pixelScale = Spring.GetConfigFloat("Aoe2UnitPixelsToWorld", 0.55)
 
 		local snapshot = snapshots[selectedIndex]
@@ -150,7 +153,17 @@ if not gadgetHandler:IsSyncedCode() then
 		end)
 	end
 
-	local function DrawBox(center, right, up, front, scale)
+	local function DrawBox(center, right, up, front, scale, yawRadians)
+		if yawRadians ~= nil and yawRadians ~= 0 then
+			local cosine = math.cos(yawRadians)
+			local sine = math.sin(yawRadians)
+			-- Match CollisionVolume::ApplyLocalTransform. The tool draws its
+			-- symmetric Box with right as the local-X mirror, so this is the
+			-- equivalent world-space basis after the engine's +Y yaw.
+			local originalRight = right
+			right = Add(Scale(originalRight, cosine), Scale(front, -sine))
+			front = Add(Scale(front, cosine), Scale(originalRight, sine))
+		end
 		local halfRight = Scale(right, scale[1] * 0.5)
 		local halfUp = Scale(up, scale[2] * 0.5)
 		local halfFront = Scale(front, scale[3] * 0.5)
@@ -189,6 +202,10 @@ if not gadgetHandler:IsSyncedCode() then
 	end
 
 	local function DrawSnapshot(snapshot, index)
+		local unitDef = UnitDefs[UnitDefNames[BUILDING_NAME].id]
+		local params = unitDef.customParams or {}
+		local collisionYaw = unitDef.collisionVolume.type == "aoeBox"
+			and math.rad(tonumber(params.aoe2_collision_yaw_degrees) or 0) or 0
 		gl.LineWidth((index == selectedIndex) and 2.5 or 1.25)
 		gl.Color(0.2, 1.0, 0.2, 1.0)
 		DrawCross(snapshot.base, 7)
@@ -202,13 +219,15 @@ if not gadgetHandler:IsSyncedCode() then
 			DrawLine(snapshot.muzzle, Add(snapshot.muzzle, Scale(snapshot.weaponDirection, 54)))
 		end)
 		gl.Color(0.8, 0.1, 0.9, 0.9)
-		DrawBox(snapshot.collisionCenter, snapshot.right, snapshot.up, snapshot.front, snapshot.collisionScale)
+		DrawBox(snapshot.collisionCenter, snapshot.right, snapshot.up, snapshot.front, snapshot.collisionScale, collisionYaw)
 		DrawAxes(snapshot)
 		gl.Color(1, 1, 1, 1)
 		gl.Text(snapshot.label, snapshot.base[1], snapshot.base[2] + 12, snapshot.base[3], 13, "oc")
 	end
 
 	local function DrawPreview(snapshot)
+		local collisionType = UnitDefs[UnitDefNames[BUILDING_NAME].id].collisionVolume.type
+		local collisionYaw = collisionType == "aoeBox" and math.rad(preview.collisionYawDegrees) or 0
 		local previewAim = LocalToWorld(snapshot, preview.aim)
 		local previewCollision = LocalToWorld(snapshot, preview.collision)
 		local previewMuzzle = LocalToWorld(snapshot, preview.muzzle)
@@ -218,7 +237,7 @@ if not gadgetHandler:IsSyncedCode() then
 		DrawCross(previewAim, 6)
 		DrawCross(previewCollision, 6)
 		DrawCross(previewMuzzle, 6)
-		DrawBox(previewCollision, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale)
+		DrawBox(previewCollision, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale, collisionYaw)
 		gl.BeginEnd(GL.LINES, function()
 			DrawLine(previewMuzzle, Add(previewMuzzle, Scale(previewDirection, 54)))
 		end)
@@ -240,8 +259,10 @@ if not gadgetHandler:IsSyncedCode() then
 -- Collision centre uses aoe2_collision_local independently of aim_local.
 return {
 	["aoe_west_castle_age3"] = {
+		collisionVolumeType = "AoeBox",
 		collisionVolumeScales = "%.3f %.3f %.3f",
 		customParams = {
+			aoe2_collision_yaw_degrees = "%.3f",
 			aoe2_aim_local = "%.3f %.3f %.3f",
 			aoe2_collision_local = "%.3f %.3f %.3f",
 			aoe2_weapon1_muzzle_local = "%.3f %.3f %.3f",
@@ -253,6 +274,7 @@ return {
 			BASE_MUZZLE_LOCAL[1], BASE_MUZZLE_LOCAL[2], BASE_MUZZLE_LOCAL[3],
 			muzzleCorrection[1], muzzleCorrection[2], muzzleCorrection[3],
 			preview.collisionScale[1], preview.collisionScale[2], preview.collisionScale[3],
+			preview.collisionYawDegrees,
 			preview.aim[1], preview.aim[2], preview.aim[3],
 			preview.collision[1], preview.collision[2], preview.collision[3],
 			preview.muzzle[1], preview.muzzle[2], preview.muzzle[3],
@@ -282,7 +304,9 @@ return {
 		local delta = direction * control.step * multiplier
 		if control.key ~= nil then
 			preview[control.key] = math.max(control.minimum or -math.huge, math.min(control.maximum or math.huge, preview[control.key] + delta))
-			Spring.SetConfigFloat("Aoe2UnitPixelsToWorld", preview.pixelScale, true)
+			if control.key == "pixelScale" then
+				Spring.SetConfigFloat("Aoe2UnitPixelsToWorld", preview.pixelScale, true)
+			end
 		else
 			control.value[control.index] = math.max(control.minimum or -math.huge, math.min(control.maximum or math.huge, control.value[control.index] + delta))
 			if control.value == preview.muzzle then

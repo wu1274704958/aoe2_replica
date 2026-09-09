@@ -30,6 +30,7 @@ public:
 	void Kill();
 
 	S3DModel* LoadModel(std::string name, bool preload = false);
+	S3DModel* GetDummyModel();
 	std::string FindModelPath(std::string name) const;
 
 	bool IsValid() const { return (!parsers.empty()); }

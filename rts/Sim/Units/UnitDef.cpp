@@ -819,6 +819,7 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 
 		// custom parameters table
 		paramsTable.GetMap(customParams);
+		ApplyAoeCollisionYaw();
 		ParseUnitDefAnchors(*this);
 	}
 

@@ -172,8 +172,10 @@ public:
 	void Update();
 	void SetNativeModelVisible(const CUnit* unit, bool visible);
 	bool ReplacesNativeModel(const CUnit* unit) const;
+	bool GetNativeCullBounds(const CUnit* unit, float3& center, float& radius) const;
 	void SetNativeModelVisible(const CFeature* feature, bool visible);
 	bool ReplacesNativeModel(const CFeature* feature) const;
+	bool GetNativeCullBounds(const CFeature* feature, float3& center, float& radius) const;
 	int GetReadAllyTeam() const override { return AllAccessTeam; }
 
 	bool WantsEvent(const std::string& eventName) override
@@ -902,6 +904,23 @@ bool Aoe2GameplayBridgeImpl::ReplacesNativeModel(const CUnit* unit) const
 	return mappings[unit->unitDef->id].hideNativeModel;
 }
 
+bool Aoe2GameplayBridgeImpl::GetNativeCullBounds(const CUnit* unit, float3& center, float& radius) const
+{
+	if (!enabled.load(std::memory_order_acquire) || unit == nullptr || unit->unitDef == nullptr ||
+		unit->unitDef->id <= 0 || static_cast<std::size_t>(unit->unitDef->id) >= mappings.size())
+		return false;
+	const auto& mapping = mappings[unit->unitDef->id];
+	if (!mapping.usable)
+		return false;
+
+	Aoe2AppearanceRenderBounds bounds;
+	if (!CAoe2UnitRenderer::GetAppearanceRenderBounds(mapping.appearance, bounds))
+		return false;
+	center = unit->drawPos + UpVector * mapping.groundOffset;
+	radius = std::max(1.0f, bounds.radius * mapping.scale);
+	return true;
+}
+
 void Aoe2GameplayBridgeImpl::SetNativeModelVisible(const CFeature* feature, bool visible)
 {
 	if (feature == nullptr || feature->id < 0 || static_cast<std::size_t>(feature->id) >= featureSlots.size())
@@ -919,6 +938,26 @@ bool Aoe2GameplayBridgeImpl::ReplacesNativeModel(const CFeature* feature) const
 	const auto& slot = featureSlots[feature->id];
 	return slot.IsActive() && slot.featureToken == reinterpret_cast<std::uintptr_t>(feature) &&
 		slot.mappingIndex < mappings.size() && mappings[slot.mappingIndex].hideNativeModel;
+}
+
+bool Aoe2GameplayBridgeImpl::GetNativeCullBounds(const CFeature* feature, float3& center, float& radius) const
+{
+	if (!enabled.load(std::memory_order_acquire) || feature == nullptr || feature->id < 0 ||
+		static_cast<std::size_t>(feature->id) >= featureSlots.size())
+		return false;
+	const auto& slot = featureSlots[feature->id];
+	if (!slot.IsActive() || slot.featureToken != reinterpret_cast<std::uintptr_t>(feature) || slot.mappingIndex >= mappings.size())
+		return false;
+	const auto& mapping = mappings[slot.mappingIndex];
+	if (!mapping.usable)
+		return false;
+
+	Aoe2AppearanceRenderBounds bounds;
+	if (!CAoe2UnitRenderer::GetAppearanceRenderBounds(mapping.appearance, bounds))
+		return false;
+	center = feature->drawPos + UpVector * mapping.groundOffset;
+	radius = std::max(1.0f, bounds.radius * mapping.scale);
+	return true;
 }
 
 } // namespace
@@ -976,6 +1015,15 @@ bool CAoe2UnitGameplayRenderBridge::ReplacesNativeModel(const CUnit* unit)
 #endif
 }
 
+bool CAoe2UnitGameplayRenderBridge::GetNativeCullBounds(const CUnit* unit, float3& center, float& radius)
+{
+#ifndef HEADLESS
+	return bridge != nullptr && bridge->GetNativeCullBounds(unit, center, radius);
+#else
+	return false;
+#endif
+}
+
 void CAoe2UnitGameplayRenderBridge::SetNativeModelVisible(const CFeature* feature, bool visible)
 {
 #ifndef HEADLESS
@@ -988,6 +1036,15 @@ bool CAoe2UnitGameplayRenderBridge::ReplacesNativeModel(const CFeature* feature)
 {
 #ifndef HEADLESS
 	return bridge != nullptr && bridge->ReplacesNativeModel(feature);
+#else
+	return false;
+#endif
+}
+
+bool CAoe2UnitGameplayRenderBridge::GetNativeCullBounds(const CFeature* feature, float3& center, float& radius)
+{
+#ifndef HEADLESS
+	return bridge != nullptr && bridge->GetNativeCullBounds(feature, center, radius);
 #else
 	return false;
 #endif

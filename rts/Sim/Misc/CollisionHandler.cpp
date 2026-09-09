@@ -99,7 +99,7 @@ bool CCollisionHandler::Collision(
 			// transform into midpos-relative space
 			CMatrix44f mr = m;
 			mr.Translate(o->relMidPos);
-			mr.Translate(v->GetOffsets());
+			v->ApplyLocalTransform(mr);
 
 			hit = CCollisionHandler::Collision(v, mr, p);
 		}
@@ -187,7 +187,11 @@ bool CCollisionHandler::Collision(const CollisionVolume* v, const CMatrix44f& m,
 				} break;
 			}
 		} break;
-		case CollisionVolume::COLVOL_TYPE_BOX: {
+		case CollisionVolume::COLVOL_TYPE_BOX:
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case CollisionVolume::COLVOL_TYPE_AOE_BOX:
+	#endif
+		{
 			const bool b1 = (math::fabs(pi.x) < v->GetHScales().x);
 			const bool b2 = (math::fabs(pi.y) < v->GetHScales().y);
 			const bool b3 = (math::fabs(pi.z) < v->GetHScales().z);
@@ -348,7 +352,7 @@ inline bool CCollisionHandler::Intersect(
 	CMatrix44f mr = m;
 
 	mr.Translate(o->relMidPos * s);
-	mr.Translate(v->GetOffsets());
+	v->ApplyLocalTransform(mr);
 
 	return (CCollisionHandler::Intersect(v, mr, p0, p1, cq));
 }
@@ -388,7 +392,11 @@ bool CCollisionHandler::Intersect(const CollisionVolume* v, const CMatrix44f& m,
 		case CollisionVolume::COLVOL_TYPE_CYLINDER: {
 			intersect = CCollisionHandler::IntersectCylinder(v, pi0, pi1, q);
 		} break;
-		case CollisionVolume::COLVOL_TYPE_BOX: {
+		case CollisionVolume::COLVOL_TYPE_BOX:
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case CollisionVolume::COLVOL_TYPE_AOE_BOX:
+	#endif
+		{
 			// also covers footprints, but without taking the blocking-map into account
 			// TODO: this would require stepping ray across non-blocking yardmap squares?
 			//
@@ -800,4 +808,3 @@ bool CCollisionHandler::IntersectBox(const CollisionVolume* v, const float3& pi0
 
 	return (b0 == CQ_POINT_ON_RAY || b1 == CQ_POINT_ON_RAY);
 }
-

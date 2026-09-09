@@ -6,6 +6,7 @@
 
 class CUnit;
 class CFeature;
+class float3;
 
 struct Aoe2UnitGameplayBridgeDiagnostics {
 	std::uint32_t mappedUnitDefs = 0;
@@ -31,7 +32,9 @@ public:
 	// Called by UnitDrawer after it has applied the native LOS/icon/view rules.
 	static void SetNativeModelVisible(const CUnit* unit, bool visible);
 	static bool ReplacesNativeModel(const CUnit* unit);
+	static bool GetNativeCullBounds(const CUnit* unit, float3& center, float& radius);
 	static void SetNativeModelVisible(const CFeature* feature, bool visible);
 	static bool ReplacesNativeModel(const CFeature* feature);
+	static bool GetNativeCullBounds(const CFeature* feature, float3& center, float& radius);
 	static Aoe2UnitGameplayBridgeDiagnostics GetDiagnostics();
 };

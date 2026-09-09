@@ -857,6 +857,11 @@ int LuaUtils::PushColVolTable(lua_State* L, const CollisionVolume* vol) {
 		case CollisionVolume::COLVOL_TYPE_BOX:
 			HSTR_PUSH_CSTRING(L, "type", "box");
 			break;
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		case CollisionVolume::COLVOL_TYPE_AOE_BOX:
+			HSTR_PUSH_CSTRING(L, "type", "aoeBox");
+			break;
+	#endif
 		case CollisionVolume::COLVOL_TYPE_SPHERE:
 			HSTR_PUSH_CSTRING(L, "type", "sphere");
 			break;

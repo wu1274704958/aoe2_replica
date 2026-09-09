@@ -144,6 +144,7 @@ struct Appearance {
 	std::array<std::filesystem::path, AOE2_ANIMATION_SLOT_COUNT> configPaths;
 	std::array<bool, AOE2_ANIMATION_SLOT_COUNT> requirePlayerColor{};
 	int attackReleaseFrame = 0;
+	float cullRadiusPixels = 0.0f;
 };
 
 struct Instance {
@@ -381,6 +382,26 @@ void ResolveMissingFrames(Layer& layer, int directionCount, int framesPerDirecti
 	}
 }
 
+void IncludeLayerRenderBounds(Appearance& appearance, const Layer& layer)
+{
+	if (!layer.usable)
+		return;
+
+	for (const Frame& frame : layer.frames) {
+		if (!frame.present)
+			continue;
+		const float horizontal = std::max(frame.footX, frame.width - frame.footX);
+		const float vertical = std::max(frame.footY, frame.height - frame.footY);
+		appearance.cullRadiusPixels = std::max(appearance.cullRadiusPixels, std::hypot(horizontal, vertical));
+	}
+}
+
+void IncludeAnimationRenderBounds(Appearance& appearance, const Animation& animation)
+{
+	IncludeLayerRenderBounds(appearance, animation.main);
+	IncludeLayerRenderBounds(appearance, animation.shadow);
+}
+
 enum class TextureEncoding {
 	Rgba,
 	ShadowR8,
@@ -485,6 +506,7 @@ public:
 	bool Destroy(Aoe2InstanceHandle handle);
 	Instance* Get(Aoe2InstanceHandle handle);
 	bool EnsureAnimation(Appearance& appearance, Aoe2UnitAnimationSlot animationSlot);
+	bool GetAppearanceRenderBounds(Aoe2AppearanceHandle handle, Aoe2AppearanceRenderBounds& bounds) const;
 
 	void CreateTestGrid();
 	void RebuildBatches();
@@ -731,6 +753,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			const auto configPath = manifestPath.parent_path() / GetString(entry["config"]);
 			appearance->animations[i] = LoadAnimation(configPath, name);
 			appearance->loaded[i] = true;
+			IncludeAnimationRenderBounds(*appearance, appearance->animations[i]);
 		}
 		for (const auto& animation : appearance->animations) {
 			diagnostics.textureBytes += animation.main.textureBytes;
@@ -753,6 +776,21 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 	}
 }
 
+bool Aoe2RendererImpl::GetAppearanceRenderBounds(
+	Aoe2AppearanceHandle handle,
+	Aoe2AppearanceRenderBounds& bounds
+) const
+{
+	if (!handle || handle.index >= appearances.size())
+		return false;
+	const auto& appearance = appearances[handle.index];
+	if (appearance == nullptr || appearance->generation != handle.generation || appearance->cullRadiusPixels <= 0.0f)
+		return false;
+
+	bounds.radius = appearance->cullRadiusPixels * pixelsToWorld;
+	return bounds.radius > 0.0f;
+}
+
 bool Aoe2RendererImpl::EnsureAnimation(Appearance& appearance, Aoe2UnitAnimationSlot animationSlot)
 {
 	const std::size_t index = AnimationIndex(animationSlot);
@@ -771,6 +809,7 @@ bool Aoe2RendererImpl::EnsureAnimation(Appearance& appearance, Aoe2UnitAnimation
 		);
 		appearance.loaded[index] = true;
 		const auto& animation = appearance.animations[index];
+		IncludeAnimationRenderBounds(appearance, animation);
 		diagnostics.textureBytes += animation.main.textureBytes;
 		diagnostics.textureBytes += animation.shadow.textureBytes;
 		diagnostics.textureBytes += animation.playerColor.textureBytes;
@@ -887,6 +926,7 @@ Aoe2AppearanceHandle Aoe2RendererImpl::PreloadGraphics(const std::string& graphi
 			manifestPath.parent_path() / GetString(entry["config"]), animationName, false);
 		appearance->loaded[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = true;
 		const auto& animation = appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)];
+		IncludeAnimationRenderBounds(*appearance, animation);
 		diagnostics.textureBytes += animation.main.textureBytes + animation.shadow.textureBytes + animation.playerColor.textureBytes;
 		const auto index = static_cast<std::uint32_t>(appearances.size());
 		appearances.push_back(std::move(appearance));
@@ -1023,8 +1063,7 @@ void Aoe2RendererImpl::RebuildBatches()
 		if (!instance.alive)
 			continue;
 		++diagnostics.liveInstances;
-		if (!instance.visible || instance.appearanceIndex >= appearances.size() ||
-			!camera->InView(instance.position, 128.0f * instance.scale))
+		if (!instance.visible || instance.appearanceIndex >= appearances.size())
 			continue;
 		auto& appearance = *appearances[instance.appearanceIndex];
 		auto& animation = appearance.animations[AnimationIndex(instance.animation)];
@@ -1478,6 +1517,14 @@ bool CAoe2UnitRenderer::GetAnimationInfo(
 		? std::clamp(appearancePtr->attackReleaseFrame / animation.fps, 0.0f, info.durationSeconds)
 		: 0.0f;
 	return true;
+}
+
+bool CAoe2UnitRenderer::GetAppearanceRenderBounds(
+	Aoe2AppearanceHandle appearance,
+	Aoe2AppearanceRenderBounds& bounds
+)
+{
+	return renderer != nullptr && renderer->GetAppearanceRenderBounds(appearance, bounds);
 }
 
 Aoe2InstanceHandle CAoe2UnitRenderer::CreateInstance(const Aoe2UnitInstanceDesc& desc)

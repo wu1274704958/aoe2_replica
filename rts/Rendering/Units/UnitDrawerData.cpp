@@ -35,6 +35,19 @@
 
 static FixedDynMemPoolT<MAX_UNITS / 1000, MAX_UNITS / 32, GhostSolidObject> ghostMemPool;
 
+static void GetUnitCullBounds(const CUnit* unit, float3& center, float& radius)
+{
+	center = unit->drawMidPos;
+	radius = unit->GetDrawRadius();
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (unit->unitDef != nullptr && unit->unitDef->UsesAoeLogicalModel()) {
+		center = unit->drawPos;
+		radius = std::max(1.0f, unit->radius);
+	}
+	CAoe2UnitGameplayRenderBridge::GetNativeCullBounds(unit, center, radius);
+#endif
+}
+
 ///////////////////////////
 
 CR_BIND_POOL(GhostSolidObject, ,ghostMemPool.allocMem, ghostMemPool.freeMem)
@@ -307,7 +320,10 @@ void CUnitDrawerData::UpdateUnitIconState(CUnit* unit)
 
 		asIcon &= DrawAsIconByDistance(unit, (unit->pos - camera->GetPos()).SqLength());
 		// drawing icons is cheap but not free, avoid a perf-hit when many are offscreen
-		asIcon &= (camera->InView(unit->drawMidPos, unit->GetDrawRadius()));
+		float3 cullCenter;
+		float cullRadius;
+		GetUnitCullBounds(unit, cullCenter, cullRadius);
+		asIcon &= camera->InView(cullCenter, cullRadius);
 		unit->SetIsIcon(asIcon);
 	}
 }
@@ -376,6 +392,9 @@ void CUnitDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	CUnit* u = static_cast<CUnit*>(o);
+	float3 cullCenter;
+	float cullRadius;
+	GetUnitCullBounds(u, cullCenter, cullRadius);
 
 	{
 		//icons flag is set before UpdateObjectDrawFlags() is called
@@ -406,7 +425,7 @@ void CUnitDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 		if (!(u->losStatus[gu->myAllyTeam] & LOS_INLOS) && !gu->spectatingFullView)
 			continue;
 
-		if (!cam->InView(u->drawMidPos, u->GetDrawRadius()))
+		if (!cam->InView(cullCenter, cullRadius))
 			continue;
 
 		switch (camType)
@@ -426,7 +445,7 @@ void CUnitDrawerData::UpdateObjectDrawFlags(CSolidObject* o) const
 			} break;
 
 			case CCamera::CAMTYPE_UWREFL: {
-				if (CModelDrawerHelper::ObjectVisibleReflection(u->drawMidPos, cam->GetPos(), u->GetDrawRadius()))
+				if (CModelDrawerHelper::ObjectVisibleReflection(cullCenter, cam->GetPos(), cullRadius))
 					u->AddDrawFlag(DrawFlags::SO_REFLEC_FLAG);
 			} break;
 

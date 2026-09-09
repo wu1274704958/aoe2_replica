@@ -307,6 +307,11 @@ S3DModel* CModelLoader::LoadModel(std::string name, bool preload)
 	return model;
 }
 
+S3DModel* CModelLoader::GetDummyModel()
+{
+	return models.empty() ? nullptr : &models[0];
+}
+
 S3DModel* CModelLoader::GetCachedModel(std::string fullName)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -480,4 +485,3 @@ void CModelLoader::Upload(S3DModel* model) const {
 
 	model->uploaded = true;
 }
-

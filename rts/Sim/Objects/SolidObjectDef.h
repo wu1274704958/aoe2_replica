@@ -48,6 +48,8 @@ public:
 
 	void ParseCollisionVolume(const LuaTable& odTable);
 	void ParseSelectionVolume(const LuaTable& odTable);
+	void ApplyAoeCollisionYaw();
+	bool UsesAoeLogicalModel() const;
 
 public:
 	int id;
@@ -84,4 +86,3 @@ public:
 };
 
 #endif
-

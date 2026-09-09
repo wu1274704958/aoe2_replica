@@ -31,6 +31,11 @@ struct Aoe2UnitAnimationInfo {
 	bool loop = false;
 };
 
+struct Aoe2AppearanceRenderBounds {
+	// Conservative sphere radius around the sprite foot, in Recoil world units.
+	float radius = 0.0f;
+};
+
 struct Aoe2AppearanceHandle {
 	std::uint32_t index = 0;
 	std::uint32_t generation = 0;
@@ -91,6 +96,7 @@ public:
 	// Loads an exported graphics cache entry into the shared sprite batches.
 	static Aoe2AppearanceHandle PreloadGraphicsAppearance(const std::string& graphicsId);
 	static bool GetAnimationInfo(Aoe2AppearanceHandle appearance, Aoe2UnitAnimationSlot animation, Aoe2UnitAnimationInfo& info);
+	static bool GetAppearanceRenderBounds(Aoe2AppearanceHandle appearance, Aoe2AppearanceRenderBounds& bounds);
 	static Aoe2InstanceHandle CreateInstance(const Aoe2UnitInstanceDesc& desc);
 	static bool DestroyInstance(Aoe2InstanceHandle handle);
 	static bool SetTransform(Aoe2InstanceHandle handle, const float3& position, float headingRadians, float scale);

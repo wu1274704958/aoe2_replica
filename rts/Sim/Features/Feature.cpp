@@ -1,6 +1,8 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "Feature.h"
+
+#include <cmath>
 #include "FeatureDef.h"
 #include "FeatureDefHandler.h"
 #include "FeatureMemPool.h"
@@ -251,6 +253,12 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 			SetRadiusAndHeight(TREE_RADIUS, TREE_RADIUS * 2.0f);
 		} break;
 	}
+	if (def->UsesAoeLogicalModel()) {
+		const float footprintX = xsize * SQUARE_SIZE;
+		const float footprintZ = zsize * SQUARE_SIZE;
+		const float footprintRadius = std::sqrt(footprintX * footprintX + footprintZ * footprintZ) * 0.5f;
+		SetRadiusAndHeight(std::max(1.0f, footprintRadius), std::max(1.0f, std::max(footprintX, footprintZ)));
+	}
 
 	// TODO: support custom buildee radii.
 	buildeeRadius = radius;
@@ -263,6 +271,14 @@ void CFeature::Initialize(const FeatureLoadParams& params)
 
 	collisionVolume.InitDefault(float4(radius, height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
 	selectionVolume.InitDefault(float4(radius, height,  xsize * SQUARE_SIZE, zsize * SQUARE_SIZE));
+	if (def->UsesAoeLogicalModel()) {
+		const float logicalHeight = std::max(
+			1.0f,
+			collisionVolume.GetOffset(CollisionVolume::COLVOL_AXIS_Y) + collisionVolume.GetHScale(CollisionVolume::COLVOL_AXIS_Y)
+		);
+		SetRadiusAndHeight(collisionVolume.GetBoundingRadius(), logicalHeight);
+		buildeeRadius = radius;
+	}
 
 
 	// feature does not have an assigned ID yet

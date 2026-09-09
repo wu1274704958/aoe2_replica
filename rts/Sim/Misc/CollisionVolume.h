@@ -27,6 +27,14 @@ public:
 		COLVOL_TYPE_CYLINDER  =  1,
 		COLVOL_TYPE_BOX       =  2,
 		COLVOL_TYPE_SPHERE    =  3,
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+		// A box with an additional Lua-configured local Y-axis rotation for
+		// matching the projected footprints of AOE2 sprites.
+		COLVOL_TYPE_AOE_BOX    = 4,
+		COLVOL_NUM_TYPES       = 5,
+	#else
+		COLVOL_NUM_TYPES       = 4,
+	#endif
 	};
 	enum {
 		COLVOL_AXIS_X = 0,
@@ -87,6 +95,10 @@ public:
 	void FixTypeAndScale(float3& scales);
 	void SetBoundingRadius();
 	void SetOffsets(const float3& offsets) { axisOffsets = offsets; }
+	void SetLocalYaw(float radians) { localYaw = radians; }
+	// Applies this volume's local translation and optional orientation after
+	// the caller has positioned the containing object's mid-position.
+	void ApplyLocalTransform(CMatrix44f& matrix) const;
 
 	int GetVolumeType() const { return volumeType; }
 	void SetVolumeType(int type) { volumeType = type; }
@@ -104,6 +116,7 @@ public:
 
 	float GetOffset(int axis) const { return axisOffsets[axis]; }
 	const float3& GetOffsets() const { return axisOffsets; }
+	float GetLocalYaw() const { return localYaw; }
 
 	float GetScale(int axis) const { return fullAxisScales[axis]; }
 	float GetHScale(int axis) const { return halfAxisScales[axis]; }
@@ -120,7 +133,7 @@ public:
 	bool DefaultToFootPrint() const { return defaultToFootPrint; }
 	bool DefaultToPieceTree() const { return defaultToPieceTree; }
 
-	bool HasCustomType() const { return (volumeType < COLVOL_TYPE_SPHERE); }
+	bool HasCustomType() const { return (volumeType != COLVOL_TYPE_SPHERE); }
 	bool HasCustomProp(float r) const { return (axisOffsets.SqLength() >= 1.0f || math::fabs(volumeBoundingRadius - r) >= 1.0f); }
 
 	float3 GetWorldSpacePos(const CSolidObject* o, const float3& extOffsets = ZeroVector) const;
@@ -141,6 +154,7 @@ private:
 	float3 halfAxisScalesSqr = OnesVector;         ///< half-length axis scales (squared)
 	float3 halfAxisScalesInv = OnesVector;         ///< half-length axis scales (inverted)
 	float3 axisOffsets;                            ///< offsets wrt. the model's mid-position (world-space)
+	float localYaw = 0.0f;                        ///< optional local Y-axis rotation in radians
 
 	float volumeBoundingRadius   = 1.0f;           ///< radius of minimally-bounding sphere around volume
 	float volumeBoundingRadiusSq = 1.0f;           ///< squared radius of minimally-bounding sphere
@@ -159,4 +173,3 @@ private:
 };
 
 #endif
-

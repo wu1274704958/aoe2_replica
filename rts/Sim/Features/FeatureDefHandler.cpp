@@ -152,6 +152,9 @@ FeatureDef* CFeatureDefHandler::CreateFeatureDef(const LuaTable& fdTable, const 
 
 	// custom parameters table
 	fdTable.SubTable("customParams").GetMap(fd.customParams);
+	fd.ApplyAoeCollisionYaw();
+	if (fd.UsesAoeLogicalModel())
+		fd.drawType = DRAWTYPE_MODEL;
 
 	return &fd;
 }
@@ -257,4 +260,3 @@ void CFeatureDefHandler::LoadFeatureDefsFromMap()
 
 	AddFeatureDef(geoDefName, CreateDefaultGeoFeatureDef(geoDefName), true);
 }
-

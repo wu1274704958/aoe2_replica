@@ -1,12 +1,16 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
 #include "SolidObjectDef.h"
+
+#include <cmath>
 #include "Lua/LuaParser.h"
 #include "Rendering/Models/IModelParser.h"
 #include "Rendering/Models/3DModel.hpp"
 #include "Sim/Misc/CollisionVolume.h"
 #include "System/EventHandler.h"
 #include "System/Log/ILog.h"
+#include "System/SpringMath.h"
+#include "System/StringUtil.h"
 
 #include "System/Misc/TracyDefs.h"
 
@@ -79,10 +83,62 @@ S3DModel* SolidObjectDef::LoadModel() const
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (model != nullptr)
 		return model;
+	if (UsesAoeLogicalModel())
+		return (model = modelLoader.GetDummyModel());
 	if (modelName.empty())
 		return nullptr;
 
 	return (model = modelLoader.LoadModel(modelName));
+}
+
+bool SolidObjectDef::UsesAoeLogicalModel() const
+{
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (!modelName.empty())
+		return false;
+
+	const bool hasAppearance = customParams.contains("aoe2_unit_id") || customParams.contains("aoe2_building_id");
+	if (!hasAppearance)
+		return false;
+
+	if (const auto it = customParams.find("aoe2_corpse"); it != customParams.end()) {
+		const std::string value = StringToLower(it->second);
+		if (value == "1" || value == "true" || value == "yes" || value == "on")
+			return true;
+	}
+
+	if (const auto it = customParams.find("aoe2_hide_native_model"); it != customParams.end()) {
+		const std::string value = StringToLower(it->second);
+		return value == "1" || value == "true" || value == "yes" || value == "on";
+	}
+#endif
+	return false;
+}
+
+void SolidObjectDef::ApplyAoeCollisionYaw()
+{
+#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (collisionVolume.GetVolumeType() != CollisionVolume::COLVOL_TYPE_AOE_BOX &&
+		selectionVolume.GetVolumeType() != CollisionVolume::COLVOL_TYPE_AOE_BOX)
+		return;
+
+	float yawDegrees = 0.0f;
+	if (const auto it = customParams.find("aoe2_collision_yaw_degrees"); it != customParams.end()) {
+		bool failed = false;
+		yawDegrees = StringToFloat(it->second, &failed);
+		if (failed || !std::isfinite(yawDegrees)) {
+			LOG_L(L_WARNING, "SolidObjectDef %s has invalid aoe2_collision_yaw_degrees=%s; using 0",
+				name.c_str(), it->second.c_str());
+			yawDegrees = 0.0f;
+		}
+	}
+
+	const float yawRadians = std::remainder(yawDegrees, 360.0f) * math::DEG_TO_RAD;
+	if (collisionVolume.GetVolumeType() == CollisionVolume::COLVOL_TYPE_AOE_BOX)
+		collisionVolume.SetLocalYaw(yawRadians);
+	if (selectionVolume.GetVolumeType() == CollisionVolume::COLVOL_TYPE_AOE_BOX)
+		selectionVolume.SetLocalYaw(yawRadians);
+#endif
 }
 
 float SolidObjectDef::GetModelRadius() const
@@ -97,6 +153,19 @@ void SolidObjectDef::ParseCollisionVolume(const LuaTable& odTable)
 	RECOIL_DETAILED_TRACY_ZONE;
 	const LuaTable& cvTable = odTable.SubTable("collisionVolume");
 	const std::string& cvType = odTable.GetString("collisionVolumeType", "");
+
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (!cvTable.IsValid() && cvType == "AoeBox") {
+		collisionVolume.InitShape(
+			odTable.GetFloat3("collisionVolumeScales", ZeroVector),
+			odTable.GetFloat3("collisionVolumeOffsets", ZeroVector),
+			CollisionVolume::COLVOL_TYPE_AOE_BOX,
+			CollisionVolume::COLVOL_HITTEST_CONT,
+			CollisionVolume::COLVOL_AXIS_Z
+		);
+		return;
+	}
+	#endif
 
 	if (cvTable.IsValid()) {
 		collisionVolume = CollisionVolume(
@@ -128,6 +197,19 @@ void SolidObjectDef::ParseSelectionVolume(const LuaTable& odTable)
 	const LuaTable& svTable = odTable.SubTable("selectionVolume");
 	const std::string& svType = odTable.GetString("selectionVolumeType", odTable.GetString("collisionVolumeType", ""));
 
+	#if defined(ENABLE_AOE2_UNIT_RENDERER)
+	if (!svTable.IsValid() && svType == "AoeBox") {
+		selectionVolume.InitShape(
+			odTable.GetFloat3("selectionVolumeScales", odTable.GetFloat3("collisionVolumeScales", ZeroVector)),
+			odTable.GetFloat3("selectionVolumeOffsets", odTable.GetFloat3("collisionVolumeOffsets", ZeroVector)),
+			CollisionVolume::COLVOL_TYPE_AOE_BOX,
+			CollisionVolume::COLVOL_HITTEST_CONT,
+			CollisionVolume::COLVOL_AXIS_Z
+		);
+		return;
+	}
+	#endif
+
 	if (svTable.IsValid()) {
 		selectionVolume = CollisionVolume(
 			svTable.GetInt("type", 's'),
@@ -148,4 +230,3 @@ void SolidObjectDef::ParseSelectionVolume(const LuaTable& odTable)
 	selectionVolume.SetDefaultToFootPrint(odTable.GetBool("useFootPrintSelectionVolume", false));
 	selectionVolume.SetIgnoreHits(selectionVolume.DefaultToPieceTree());
 }
-
