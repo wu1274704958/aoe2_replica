@@ -178,6 +178,52 @@ return {
 				{ name = "AOE_TOWER_ARROW" },
 			},
 		},
+		aoe_west_castle_age3 = {
+			name = "AOE Western Age III Castle",
+			description = "Native Recoil CBuilding with an AOE2 western castle appearance",
+			objectName = "fir_tree_smallest.s3o",
+			script = "aoe_west_castle_age3.lua",
+			explodeAs = "NOWEAPON",
+			selfDestructAs = "NOWEAPON",
+			category = "BUILDING LAND",
+			-- The source DAT collision radii are (2, 2) and the display sprite is
+			-- about 385 world units wide at Aoe2UnitPixelsToWorld=0.55. Keep the
+			-- pathing footprint and the native hit volume consistent with that size.
+			footprintX = 6,
+			footprintZ = 6,
+			yardMap = "oooooooooooooooooooooooooooooooooooo",
+			levelGround = true,
+			collisionVolumeType = "Box",
+			collisionVolumeScales = "400 330 400",
+			-- Source DAT Unit 82 (CSTL) has 4800 hit points, 11 LOS, range 8,
+			-- reload 2 s and graphic_displacement=(0, 1, 4). The uncalibrated
+			-- shared conversion is (right=x*60, up=z*30, front=y*60).
+			maxDamage = 4800,
+			buildCostMetal = 1,
+			buildTime = 1,
+			power = 1,
+			mass = 500000,
+			canMove = false,
+			canAttack = true,
+			canFireControl = true,
+			corpse = "aoe_west_castle_age3_rubble",
+			sightDistance = 660,
+			upright = true,
+			customParams = {
+				aoe2_building_id = "b_west_castle_age3",
+				aoe2_scale = "1.0",
+				aoe2_ground_offset = "0.0",
+				aoe2_player_color = "team",
+				aoe2_hide_native_model = "true",
+				aoe2_aim_local = "0 120 0",
+				aoe2_collision_local = "0 165 0",
+				aoe2_weapon1_muzzle_local = "0 120 60",
+				aoe2_weapon1_forward_local = "0 0 1",
+			},
+			weapons = {
+				{ name = "AOE_CASTLE_ARROW" },
+			},
+		},
 		},
 	FeatureDefs = {
 		aoe_archer_dead = {
@@ -236,6 +282,24 @@ return {
 				aoe2_corpse_fade_frames = "150",
 			},
 		},
+		aoe_west_castle_age3_rubble = {
+			description = "AOE western castle rubble gameplay host",
+			object = "fir_tree_smallest.s3o",
+			blocking = true,
+			reclaimable = true,
+			resurrectable = 0,
+			smokeTime = 0,
+			health = 4800,
+			metal = 1,
+			footprintX = 6,
+			footprintZ = 6,
+			customParams = {
+				aoe2_corpse = "true",
+				aoe2_building_id = "b_west_castle_age3",
+				aoe2_corpse_hold_frames = "450",
+				aoe2_corpse_fade_frames = "150",
+			},
+		},
 	},
 	WeaponDefs = {
 		noweapon = {
@@ -287,7 +351,9 @@ return {
 			impactOnly = true,
 			impulseFactor = 0,
 			impulseBoost = 0,
-			range = 550,
+			-- African Age II Tower source combat uses Projectile Unit 504,
+			-- pierce damage 3, max range 8 and a two-second reload.
+			range = 480,
 			reloadtime = 2,
 			windup = 0.5,
 			attackRecoveryTime = 0.5,
@@ -304,14 +370,58 @@ return {
 			collideFriendly = false,
 			avoidFeature = false,
 			collideFeature = false,
-			damage = { default = 5 },
+			damage = { default = 3 },
 			aoeDamage = {
-				pierce = 5,
+				pierce = 3,
 			},
 			aoeUpgradeTags = { "archer" },
 			customParams = {
+				-- Projectile Units 504 and 746 both use the same AoE2DE Graphic
+				-- 3402 (p_arrow_x2.sld), so this shared cache id avoids duplicate
+				-- GPU textures while retaining the gameplay source identity.
 				aoe2_projectile_id = "p_arrow",
 				aoe2_projectile_scale = "1.0",
+				aoe2_projectile_source_unit_id = "504",
+				aoe2_projectile_source_graphic_id = "3402",
+			},
+		},
+		aoe_castle_arrow = {
+			name = "Native castle arrow",
+			weaponType = "Cannon",
+			areaOfEffect = 8,
+			impactOnly = true,
+			impulseFactor = 0,
+			impulseBoost = 0,
+			-- Source Castle DAT max_range=8.0 converted with the existing
+			-- 60 world-units-per-AOE-range profile. Keep one native weapon slot:
+			-- that lets the AOE bridge drive one AttackA animation while Recoil
+			-- owns the five-arrow temporal burst.
+			range = 960,
+			reloadtime = 2,
+			windup = 0.5,
+			burst = 5,
+			burstRate = 0.12,
+			attackRecoveryTime = 0.5,
+			accuracy = 0,
+			sprayAngle = 0,
+			targetMoveError = 0,
+			weaponVelocity = 400,
+			gravityAffected = true,
+			turret = true,
+			avoidFriendly = false,
+			collideFriendly = false,
+			avoidFeature = false,
+			collideFeature = false,
+			damage = { default = 11 },
+			aoeDamage = {
+				pierce = 11,
+			},
+			aoeUpgradeTags = { "castle" },
+			customParams = {
+				aoe2_projectile_id = "p_arrow",
+				aoe2_projectile_scale = "1.0",
+				aoe2_projectile_source_unit_id = "746",
+				aoe2_projectile_source_graphic_id = "3402",
 			},
 		},
 		aoe_camel_scout_melee = {

@@ -1,7 +1,7 @@
 function gadget:GetInfo()
 	return {
 		name = "AOE Building Bridge Test",
-		desc = "Four native AOE towers with runtime anchor and collision calibration",
+		desc = "Four native AOE castles with runtime anchor and collision calibration",
 		author = "OpenAI Codex",
 		license = "GPL v2 or later",
 		layer = 2,
@@ -23,14 +23,23 @@ if not ReadBooleanOption(options, "aoe_building_test", false) then
 	return
 end
 
-local TOWER_NAME = "aoe_afri_tower_age2"
+-- b_west_castle_age3 is a fixed-orientation (one-direction) schema-4 building.
+-- The four native headings deliberately exercise the Bridge's transform,
+-- collision and weapon-anchor handling without pretending that the Sprite has
+-- four distinct visual facings.
+local BUILDING_NAME = "aoe_west_castle_age3"
+local BUILDING_RESOURCE_ID = "b_west_castle_age3"
+local BUILDING_DISPLAY_NAME = "Western Age III Castle"
 local ENEMY_NAME = "aoe_archer"
 local CONTROL_MESSAGE_PREFIX = "aoe_building_test:"
 local SPAWN_MESSAGE = CONTROL_MESSAGE_PREFIX .. "spawn_enemy"
 local SNAPSHOT_PERIOD = 15
 local SPAWN_COOLDOWN = 10
 local TOWER_COUNT = 4
-local BASE_MUZZLE_LOCAL = { 0, 191, 60 }
+-- Source DAT Unit 82 graphic_displacement=(0,1,4), converted by the shared
+-- profile: (right=x*60, up=z*30, front=y*60). This is intentionally an
+-- uncalibrated baseline for the preview tool.
+local BASE_MUZZLE_LOCAL = { 0, 120, 60 }
 local BELOW_FOOT_CAMERA_BIAS_SCALE = 1.0
 
 if not gadgetHandler:IsSyncedCode() then
@@ -45,11 +54,11 @@ if not gadgetHandler:IsSyncedCode() then
 	local runtimeMuzzleOverrideAvailable = true
 	local previewCollisionScaleInitialized = false
 	local preview = {
-		aim = { 0, 60, 0 },
-		collision = { 0, 120, 0 },
-		muzzle = { 0, 191, 60 },
+		aim = { 0, 120, 0 },
+		collision = { 0, 165, 0 },
+		muzzle = { 0, 120, 60 },
 		forward = { 0, 0, 1 },
-		collisionScale = { 120, 240, 120 },
+		collisionScale = { 400, 330, 400 },
 		pixelScale = 0.55,
 	}
 	local controls = {
@@ -104,9 +113,9 @@ if not gadgetHandler:IsSyncedCode() then
 	end
 
 	local function ResetPreview(clearRuntimeOverride)
-		local unitDef = UnitDefs[UnitDefNames[TOWER_NAME].id]
+		local unitDef = UnitDefs[UnitDefNames[BUILDING_NAME].id]
 		local params = unitDef.customParams or {}
-		CopyVector(preview.aim, ParseVector(params.aoe2_aim_local, { 0, 60, 0 }))
+		CopyVector(preview.aim, ParseVector(params.aoe2_aim_local, { 0, 120, 0 }))
 		CopyVector(preview.collision, ParseVector(params.aoe2_collision_local, preview.aim))
 		CopyVector(preview.muzzle, ParseVector(params.aoe2_weapon1_muzzle_local, BASE_MUZZLE_LOCAL))
 		CopyVector(preview.forward, ParseVector(params.aoe2_weapon1_forward_local, { 0, 0, 1 }))
@@ -141,29 +150,28 @@ if not gadgetHandler:IsSyncedCode() then
 		end)
 	end
 
-	local function DrawCylinder(center, right, up, front, scale)
-		local bottom = Add(center, Scale(up, -scale[2] * 0.5))
-		local top = Add(center, Scale(up, scale[2] * 0.5))
-		local segments = 16
-		local function Ring(origin)
-			gl.BeginEnd(GL.LINE_LOOP, function()
-				for index = 0, segments - 1 do
-					local angle = index * math.pi * 2 / segments
-					local point = Add(origin, Add(
-						Scale(right, math.cos(angle) * scale[1] * 0.5),
-						Scale(front, math.sin(angle) * scale[3] * 0.5)))
-					gl.Vertex(point[1], point[2], point[3])
-				end
-			end)
-		end
-		Ring(bottom)
-		Ring(top)
+	local function DrawBox(center, right, up, front, scale)
+		local halfRight = Scale(right, scale[1] * 0.5)
+		local halfUp = Scale(up, scale[2] * 0.5)
+		local halfFront = Scale(front, scale[3] * 0.5)
+		local corners = {
+			Add(center, Add(Scale(halfRight, -1), Add(Scale(halfUp, -1), Scale(halfFront, -1)))),
+			Add(center, Add(halfRight, Add(Scale(halfUp, -1), Scale(halfFront, -1)))),
+			Add(center, Add(halfRight, Add(halfUp, Scale(halfFront, -1)))),
+			Add(center, Add(Scale(halfRight, -1), Add(halfUp, Scale(halfFront, -1)))),
+			Add(center, Add(Scale(halfRight, -1), Add(Scale(halfUp, -1), halfFront))),
+			Add(center, Add(halfRight, Add(Scale(halfUp, -1), halfFront))),
+			Add(center, Add(halfRight, Add(halfUp, halfFront))),
+			Add(center, Add(Scale(halfRight, -1), Add(halfUp, halfFront))),
+		}
+		local edges = {
+			{ 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 },
+			{ 5, 6 }, { 6, 7 }, { 7, 8 }, { 8, 5 },
+			{ 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 },
+		}
 		gl.BeginEnd(GL.LINES, function()
-			for index = 0, segments - 1, 4 do
-				local angle = index * math.pi * 2 / segments
-				local side = Add(Scale(right, math.cos(angle) * scale[1] * 0.5),
-					Scale(front, math.sin(angle) * scale[3] * 0.5))
-				DrawLine(Add(bottom, side), Add(top, side))
+			for _, edge in ipairs(edges) do
+				DrawLine(corners[edge[1]], corners[edge[2]])
 			end
 		end)
 	end
@@ -194,7 +202,7 @@ if not gadgetHandler:IsSyncedCode() then
 			DrawLine(snapshot.muzzle, Add(snapshot.muzzle, Scale(snapshot.weaponDirection, 54)))
 		end)
 		gl.Color(0.8, 0.1, 0.9, 0.9)
-		DrawCylinder(snapshot.collisionCenter, snapshot.right, snapshot.up, snapshot.front, snapshot.collisionScale)
+		DrawBox(snapshot.collisionCenter, snapshot.right, snapshot.up, snapshot.front, snapshot.collisionScale)
 		DrawAxes(snapshot)
 		gl.Color(1, 1, 1, 1)
 		gl.Text(snapshot.label, snapshot.base[1], snapshot.base[2] + 12, snapshot.base[3], 13, "oc")
@@ -210,7 +218,7 @@ if not gadgetHandler:IsSyncedCode() then
 		DrawCross(previewAim, 6)
 		DrawCross(previewCollision, 6)
 		DrawCross(previewMuzzle, 6)
-		DrawCylinder(previewCollision, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale)
+		DrawBox(previewCollision, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale)
 		gl.BeginEnd(GL.LINES, function()
 			DrawLine(previewMuzzle, Add(previewMuzzle, Scale(previewDirection, 54)))
 		end)
@@ -225,13 +233,13 @@ if not gadgetHandler:IsSyncedCode() then
 			preview.muzzle[3] - BASE_MUZZLE_LOCAL[3],
 		}
 		return string.format([[-- Generated by AOE Building Anchor Calibration. Review before merging.
--- Source DAT: b_afri_tower_age2 collision_size=(0.5,0.5,4.0), weapon_offset=(0,1,5)
+-- Source DAT: b_west_castle_age3 (Unit 82) collision_size=(2,2,4), weapon_offset=(0,1,4)
 -- Base profile: DAT (x,y,z) -> Recoil (right=x*60, up=z*30, front=y*60)
 -- Raw muzzle from base profile: (%.3f,%.3f,%.3f)
 -- Calibrated muzzle correction: (%.3f,%.3f,%.3f)
 -- Collision centre uses aoe2_collision_local independently of aim_local.
 return {
-	["aoe_afri_tower_age2"] = {
+	["aoe_west_castle_age3"] = {
 		collisionVolumeScales = "%.3f %.3f %.3f",
 		customParams = {
 			aoe2_aim_local = "%.3f %.3f %.3f",
@@ -256,7 +264,7 @@ return {
 		Spring.SetClipboard(content)
 		Spring.CreateDir("LuaUI/Config/AOEAnchorCalibration")
 		exportSerial = exportSerial + 1
-		local path = string.format("LuaUI/Config/AOEAnchorCalibration/b_afri_tower_age2_override_%d_%d.lua", Spring.GetGameFrame(), exportSerial)
+		local path = string.format("LuaUI/Config/AOEAnchorCalibration/%s_override_%d_%d.lua", BUILDING_RESOURCE_ID, Spring.GetGameFrame(), exportSerial)
 		local file = io.open(path, "w")
 		if file ~= nil then
 			file:write(content)
@@ -343,18 +351,18 @@ return {
 		gl.Color(0, 0, 0, 0.65)
 		gl.Rect(x - 8, y - (#controls + 12) * 15, x + 660, y + 8)
 		gl.Color(1, 1, 1, 1)
-		gl.Text("AOE Building Anchor Calibration  |  cyan = local preview", x, y, 13, "o")
+		gl.Text("AOE Building Anchor Calibration (" .. BUILDING_DISPLAY_NAME .. ")  |  cyan = local preview", x, y, 13, "o")
 		y = y - 17
 		if selectedSnapshot == nil then
 			gl.Color(1, 0.75, 0.2, 1)
 			gl.Text(string.format("snapshot status: waiting for synced data (%d/%d)", snapshotCount, TOWER_COUNT), x, y, 12, "o")
 		else
 			gl.Color(0.35, 1, 0.45, 1)
-			gl.Text(string.format("snapshot status: ready (%d/%d)    selected Tower: %s (%d)", snapshotCount, TOWER_COUNT, selectedSnapshot.label, selectedSnapshot.unitID), x, y, 12, "o")
+			gl.Text(string.format("snapshot status: ready (%d/%d)    selected castle: %s (%d)", snapshotCount, TOWER_COUNT, selectedSnapshot.label, selectedSnapshot.unitID), x, y, 12, "o")
 		end
 		y = y - 17
 		gl.Color(1, 1, 1, 1)
-		gl.Text(string.format("[Tab] tower %d/%d    [R] reset    [E] export + clipboard    [B] spawn enemy CMD.FIGHT", selectedIndex, TOWER_COUNT), x, y, 12, "o")
+		gl.Text(string.format("[Tab] castle %d/%d    [R] reset    [E] export + clipboard    [B] spawn enemy CMD.FIGHT", selectedIndex, TOWER_COUNT), x, y, 12, "o")
 		y = y - 17
 		gl.Text("[Up/Down] field    [Left/Right] adjust    [Shift] x10", x, y, 11, "o")
 		y = y - 15
@@ -436,13 +444,13 @@ return {
 		ResetPreview(false)
 		-- The renderer derives the absolute bias from each frame's pixels below
 		-- its foot point. This test-scene-only scale preserves the foot anchor
-		-- while keeping the tower base in front of triangulated terrain.
+		-- while keeping the castle base in front of triangulated terrain.
 		Spring.SetConfigFloat("Aoe2UnitBelowFootCameraBiasScale", BELOW_FOOT_CAMERA_BIAS_SCALE, true)
 		local cameraApplied, cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance,
 			projection = fixedTestCamera.Apply()
 		Spring.SendCommands("debugcolvol")
 		Spring.Echo(string.format(
-			"[AOE Building Test] fixed camera applied=%s projection=%s fov=%.1f height=%.1f angle=%.1fdeg belowFootBiasScale=%.2f featureDraw=%.1f featureFade=%.1f; press B to spawn enemy, Tab to select tower",
+			"[AOE Building Test] fixed camera applied=%s projection=%s fov=%.1f height=%.1f angle=%.1fdeg belowFootBiasScale=%.2f featureDraw=%.1f featureFade=%.1f; press B to spawn enemy, Tab to select castle",
 			tostring(cameraApplied), projection, cameraFov, cameraHeight, cameraAngle, BELOW_FOOT_CAMERA_BIAS_SCALE, featureDrawDistance, featureFadeDistance))
 	end
 
@@ -458,10 +466,10 @@ local runtimeMuzzleOverride = nil
 local setRuntimeMuzzleOverride = Spring.SetUnitAoe2WeaponMuzzleOverride
 
 local towerLayout = {
-	{ label = "SOUTH", x = -180, z = -180, facing = "south" },
-	{ label = "EAST",  x =  180, z = -180, facing = "east"  },
-	{ label = "NORTH", x = -180, z =  180, facing = "north" },
-	{ label = "WEST",  x =  180, z =  180, facing = "west"  },
+	{ label = "SOUTH", x = -420, z = -420, facing = "south" },
+	{ label = "EAST",  x =  420, z = -420, facing = "east"  },
+	{ label = "NORTH", x = -420, z =  420, facing = "north" },
+	{ label = "WEST",  x =  420, z =  420, facing = "west"  },
 }
 
 local function PublishRuntimeMuzzleOverrideState()
@@ -497,10 +505,10 @@ local function ApplyRuntimeMuzzleOverride()
 	end
 
 	if runtimeMuzzleOverride == nil then
-		Spring.Echo(string.format("[AOE Building Test] cleared runtime muzzle override for %d/%d towers", appliedCount, #towers))
+		Spring.Echo(string.format("[AOE Building Test] cleared runtime muzzle override for %d/%d castles", appliedCount, #towers))
 	else
 		Spring.Echo(string.format(
-			"[AOE Building Test] applied runtime muzzle override to %d/%d towers; local=(%.3f, %.3f, %.3f)",
+			"[AOE Building Test] applied runtime muzzle override to %d/%d castles; local=(%.3f, %.3f, %.3f)",
 			appliedCount, #towers,
 			runtimeMuzzleOverride[1], runtimeMuzzleOverride[2], runtimeMuzzleOverride[3]))
 	end
@@ -539,7 +547,7 @@ local function SpawnEnemy()
 	lastSpawnFrame = frame
 	spawnSerial = spawnSerial + 1
 	local angle = (spawnSerial * 2.3999632297) % (math.pi * 2)
-	local radius = 620 + (spawnSerial % 5) * 28
+	local radius = 950 + (spawnSerial % 5) * 28
 	local x = math.max(64, math.min(Game.mapSizeX - 64, centerX + math.cos(angle) * radius))
 	local z = math.max(64, math.min(Game.mapSizeZ - 64, centerZ + math.sin(angle) * radius))
 	local unitID = Spring.CreateUnit(ENEMY_NAME, x, Spring.GetGroundHeight(x, z), z, "south", 1)
@@ -559,12 +567,12 @@ function gadget:GameStart()
 	for index, entry in ipairs(towerLayout) do
 		local x = centerX + entry.x
 		local z = centerZ + entry.z
-		local unitID = Spring.CreateUnit(TOWER_NAME, x, Spring.GetGroundHeight(x, z), z, entry.facing, 0)
+		local unitID = Spring.CreateUnit(BUILDING_NAME, x, Spring.GetGroundHeight(x, z), z, entry.facing, 0)
 		if unitID == nil then
-			error("[AOE Building Test] failed to create tower " .. entry.label)
+			error("[AOE Building Test] failed to create castle " .. entry.label)
 		end
 		towers[index] = { unitID = unitID, label = entry.label }
-		Spring.Echo(string.format("[AOE Building Test] tower=%d facing=%s position=(%.1f, %.1f)",
+		Spring.Echo(string.format("[AOE Building Test] castle=%d facing=%s position=(%.1f, %.1f)",
 			unitID, entry.facing, x, z))
 	end
 	PublishRuntimeMuzzleOverrideState()
