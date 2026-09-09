@@ -239,8 +239,8 @@ void CUnit::PreInit(const UnitLoadParams& params)
 	if (unitDef->anchors.enabled) {
 		// CollisionVolume offsets are relative to the placeholder model's mid-position,
 		// whereas AOE anchors are relative to the sprite foot (unit pos).  Keep the
-		// physical collision centre on the same local point used for targeting.
-		collisionVolume.SetOffsets(unitDef->anchors.aimLocal - model->relMidPos);
+		// physical collision centre on its explicitly configured local point.
+		collisionVolume.SetOffsets(unitDef->anchors.collisionLocal - model->relMidPos);
 	}
 
 

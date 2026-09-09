@@ -97,6 +97,11 @@ void ParseUnitDefAnchors(UnitDef& unitDef)
 		return;
 
 	unitDef.anchors.enabled = true;
+	// Existing AOE UnitDefs used aim_local as the collision centre. Keep that
+	// behavior unless a sprite with a distinct visual footprint opts in to the
+	// dedicated collision anchor.
+	unitDef.anchors.collisionLocal = unitDef.anchors.aimLocal;
+	ParseAnchorVector(unitDef.customParams, "aoe2_collision_local", unitDef.anchors.collisionLocal);
 	unitDef.anchors.weapons.resize(unitDef.NumWeapons());
 	for (std::size_t weaponIndex = 0; weaponIndex < unitDef.anchors.weapons.size(); ++weaponIndex) {
 		auto& anchor = unitDef.anchors.weapons[weaponIndex];
@@ -114,8 +119,9 @@ void ParseUnitDefAnchors(UnitDef& unitDef)
 		anchor.enabled = true;
 	}
 
-	LOG_L(L_INFO, "UnitDef %s uses local AOE anchors: aim=(%.3f, %.3f, %.3f)",
-		unitDef.name.c_str(), unitDef.anchors.aimLocal.x, unitDef.anchors.aimLocal.y, unitDef.anchors.aimLocal.z);
+	LOG_L(L_INFO, "UnitDef %s uses local AOE anchors: aim=(%.3f, %.3f, %.3f), collision=(%.3f, %.3f, %.3f)",
+		unitDef.name.c_str(), unitDef.anchors.aimLocal.x, unitDef.anchors.aimLocal.y, unitDef.anchors.aimLocal.z,
+		unitDef.anchors.collisionLocal.x, unitDef.anchors.collisionLocal.y, unitDef.anchors.collisionLocal.z);
 }
 
 }

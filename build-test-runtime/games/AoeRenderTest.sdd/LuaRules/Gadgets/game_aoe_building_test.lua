@@ -31,7 +31,7 @@ local SNAPSHOT_PERIOD = 15
 local SPAWN_COOLDOWN = 10
 local TOWER_COUNT = 4
 local BASE_MUZZLE_LOCAL = { 0, 191, 60 }
-local MAIN_CAMERA_BIAS = 8.0
+local BELOW_FOOT_CAMERA_BIAS_SCALE = 1.0
 
 if not gadgetHandler:IsSyncedCode() then
 	local fixedTestCamera = VFS.Include("LuaRules/aoe_fixed_test_camera.lua")
@@ -46,6 +46,7 @@ if not gadgetHandler:IsSyncedCode() then
 	local previewCollisionScaleInitialized = false
 	local preview = {
 		aim = { 0, 60, 0 },
+		collision = { 0, 120, 0 },
 		muzzle = { 0, 191, 60 },
 		forward = { 0, 0, 1 },
 		collisionScale = { 120, 240, 120 },
@@ -55,6 +56,9 @@ if not gadgetHandler:IsSyncedCode() then
 		{ label = "aim_local.x", value = preview.aim, index = 1, step = 1 },
 		{ label = "aim_local.y", value = preview.aim, index = 2, step = 1 },
 		{ label = "aim_local.z", value = preview.aim, index = 3, step = 1 },
+		{ label = "collision_local.x", value = preview.collision, index = 1, step = 1 },
+		{ label = "collision_local.y", value = preview.collision, index = 2, step = 1 },
+		{ label = "collision_local.z", value = preview.collision, index = 3, step = 1 },
 		{ label = "muzzle_local.x", value = preview.muzzle, index = 1, step = 1 },
 		{ label = "muzzle_local.y", value = preview.muzzle, index = 2, step = 1 },
 		{ label = "muzzle_local.z", value = preview.muzzle, index = 3, step = 1 },
@@ -103,6 +107,7 @@ if not gadgetHandler:IsSyncedCode() then
 		local unitDef = UnitDefs[UnitDefNames[TOWER_NAME].id]
 		local params = unitDef.customParams or {}
 		CopyVector(preview.aim, ParseVector(params.aoe2_aim_local, { 0, 60, 0 }))
+		CopyVector(preview.collision, ParseVector(params.aoe2_collision_local, preview.aim))
 		CopyVector(preview.muzzle, ParseVector(params.aoe2_weapon1_muzzle_local, BASE_MUZZLE_LOCAL))
 		CopyVector(preview.forward, ParseVector(params.aoe2_weapon1_forward_local, { 0, 0, 1 }))
 		preview.pixelScale = Spring.GetConfigFloat("Aoe2UnitPixelsToWorld", 0.55)
@@ -197,14 +202,15 @@ if not gadgetHandler:IsSyncedCode() then
 
 	local function DrawPreview(snapshot)
 		local previewAim = LocalToWorld(snapshot, preview.aim)
+		local previewCollision = LocalToWorld(snapshot, preview.collision)
 		local previewMuzzle = LocalToWorld(snapshot, preview.muzzle)
 		local previewDirection = LocalToWorld(snapshot, Normalize(preview.forward), { 0, 0, 0 })
 		gl.LineWidth(3)
 		gl.Color(0.1, 0.9, 1, 1)
 		DrawCross(previewAim, 6)
+		DrawCross(previewCollision, 6)
 		DrawCross(previewMuzzle, 6)
-		-- AOE CUnit anchors deliberately keep its collision centre at aim_local.
-		DrawCylinder(previewAim, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale)
+		DrawCylinder(previewCollision, snapshot.right, snapshot.up, snapshot.front, preview.collisionScale)
 		gl.BeginEnd(GL.LINES, function()
 			DrawLine(previewMuzzle, Add(previewMuzzle, Scale(previewDirection, 54)))
 		end)
@@ -223,12 +229,13 @@ if not gadgetHandler:IsSyncedCode() then
 -- Base profile: DAT (x,y,z) -> Recoil (right=x*60, up=z*30, front=y*60)
 -- Raw muzzle from base profile: (%.3f,%.3f,%.3f)
 -- Calibrated muzzle correction: (%.3f,%.3f,%.3f)
--- Collision centre follows aoe2_aim_local in CUnit::PreInit.
+-- Collision centre uses aoe2_collision_local independently of aim_local.
 return {
 	["aoe_afri_tower_age2"] = {
 		collisionVolumeScales = "%.3f %.3f %.3f",
 		customParams = {
 			aoe2_aim_local = "%.3f %.3f %.3f",
+			aoe2_collision_local = "%.3f %.3f %.3f",
 			aoe2_weapon1_muzzle_local = "%.3f %.3f %.3f",
 			aoe2_weapon1_forward_local = "%.3f %.3f %.3f",
 		},
@@ -239,6 +246,7 @@ return {
 			muzzleCorrection[1], muzzleCorrection[2], muzzleCorrection[3],
 			preview.collisionScale[1], preview.collisionScale[2], preview.collisionScale[3],
 			preview.aim[1], preview.aim[2], preview.aim[3],
+			preview.collision[1], preview.collision[2], preview.collision[3],
 			preview.muzzle[1], preview.muzzle[2], preview.muzzle[3],
 			normalizedForward[1], normalizedForward[2], normalizedForward[3])
 	end
@@ -426,16 +434,16 @@ return {
 
 	function gadget:Initialize()
 		ResetPreview(false)
-		-- Keep the lower pixels of the tall tower sprite in front of the
-		-- triangulated terrain. This is test-scene-only and does not alter the
-		-- renderer's global default for ordinary games.
-		Spring.SetConfigFloat("Aoe2UnitMainCameraBias", MAIN_CAMERA_BIAS, true)
+		-- The renderer derives the absolute bias from each frame's pixels below
+		-- its foot point. This test-scene-only scale preserves the foot anchor
+		-- while keeping the tower base in front of triangulated terrain.
+		Spring.SetConfigFloat("Aoe2UnitBelowFootCameraBiasScale", BELOW_FOOT_CAMERA_BIAS_SCALE, true)
 		local cameraApplied, cameraFov, cameraHeight, cameraAngle, featureDrawDistance, featureFadeDistance,
 			projection = fixedTestCamera.Apply()
 		Spring.SendCommands("debugcolvol")
 		Spring.Echo(string.format(
-			"[AOE Building Test] fixed camera applied=%s projection=%s fov=%.1f height=%.1f angle=%.1fdeg mainSpriteBias=%.1f featureDraw=%.1f featureFade=%.1f; press B to spawn enemy, Tab to select tower",
-			tostring(cameraApplied), projection, cameraFov, cameraHeight, cameraAngle, MAIN_CAMERA_BIAS, featureDrawDistance, featureFadeDistance))
+			"[AOE Building Test] fixed camera applied=%s projection=%s fov=%.1f height=%.1f angle=%.1fdeg belowFootBiasScale=%.2f featureDraw=%.1f featureFade=%.1f; press B to spawn enemy, Tab to select tower",
+			tostring(cameraApplied), projection, cameraFov, cameraHeight, cameraAngle, BELOW_FOOT_CAMERA_BIAS_SCALE, featureDrawDistance, featureFadeDistance))
 	end
 
 	return
@@ -511,7 +519,7 @@ local function SendTowerSnapshot(index, tower)
 		return
 	end
 	-- CollisionVolume offsets are relative to midPos, not aimPos. The CUnit
-	-- AOE anchor path already makes midPos + offset land at aim_local.
+	-- AOE anchor path makes midPos + offset land at collision_local.
 	local collisionX = midX + rightX * offsetX + upX * offsetY + frontX * offsetZ
 	local collisionY = midY + rightY * offsetX + upY * offsetY + frontY * offsetZ
 	local collisionZ = midZ + rightZ * offsetX + upZ * offsetY + frontZ * offsetZ

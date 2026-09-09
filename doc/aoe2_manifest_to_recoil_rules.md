@@ -48,6 +48,7 @@ profile 必须包含版本、DAT 到 Recoil 的轴映射、每轴比例、符号
 customParams = {
   aoe2_unit_id = "u_arc_archer",
   aoe2_aim_local = "0 30 0",
+  aoe2_collision_local = "0 30 0",
   aoe2_weapon1_muzzle_local = "0 55.5 30",
   aoe2_weapon1_forward_local = "0 0 1",
 }
@@ -66,9 +67,10 @@ customParams = {
 
 - DAT `collision_size.x/y` 是地面半径，Recoil full scale 应为两倍半径后再乘对应轴比例。
 - DAT `collision_size.z` 是完整高度，Recoil `CylY` 的 Y scale 是高度乘垂直比例。
-- `aim_local.y` 应为完整高度的一半，使单位由地面延伸至顶部。AOE anchor 启用时，
-  引擎将 UnitDef collision offset 从 placeholder model 的 midPos 坐标转换为该
-  sprite-foot-relative centre，转换工具不应把 `aim_local` 原样重复写入
+- `aim_local.y` 应为完整高度的一半，使单位由地面延伸至顶部。`collision_local` 默认
+  等于 `aim_local`，但大型建筑可独立设置它，使碰撞体底部贴地而不改变受击／瞄准点。
+  AOE anchor 启用时，引擎将 UnitDef collision offset 从 placeholder model 的 midPos
+  坐标转换为该 sprite-foot-relative centre；转换工具不应再生成
   `collisionVolumeOffsets`。
 - 默认 aim strategy 为 `collision_center`；若 override 提供 `aim_local`，它优先。
 

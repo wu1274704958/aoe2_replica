@@ -175,6 +175,6 @@ Fight 队列保留结果；`[AOE Move Diagnostic] post-elimination` 用于确认
 调整，`Shift` 为十倍步长，`R` 恢复 Def 值并清除 runtime muzzle override，`E` 将
 审阅用 Lua override 复制到剪贴板并保存至 `LuaUI/Config/AOEAnchorCalibration/`。只有
 muzzle 与 Sprite 像素缩放会实时作用；aim、forward 和碰撞体尺寸始终是青色本地预览，
-不修改同步 Gameplay 或 UnitDef。场景还会以 `Aoe2UnitMainCameraBias = 8.0` 将主体 Sprite
-轻微朝摄像机推开，避免脚点以下的塔底像素被地形三角面裁剪。紫色线框以运行时 `midPos + collisionVolumeOffset`
+不修改同步 Gameplay 或 UnitDef。场景使用 `Aoe2UnitBelowFootCameraBiasScale = 1.0`：渲染器仅将
+每帧脚点以下的 Sprite 像素渐进地朝摄像机推开，偏移量随该帧脚点以下的实际像素高度自动缩放，避免塔底被地形三角面裁剪而不使主体整体漂移。紫色线框以运行时 `midPos + collisionVolumeOffset`
 计算，和原生 `/debugcolvol` 使用相同基准。

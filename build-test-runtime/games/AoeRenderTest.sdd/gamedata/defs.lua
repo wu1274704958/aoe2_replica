@@ -168,6 +168,9 @@ return {
 				-- profile (right=x*60, up=z*30, forward=y*60), then calibrated
 				-- in the building anchor preview (+41 Recoil world units on up).
 				aoe2_aim_local = "0 60 0",
+				-- Keep the enlarged 240-unit collision cylinder on the ground
+				-- without changing the tower's validated target aim point.
+				aoe2_collision_local = "0 120 0",
 				aoe2_weapon1_muzzle_local = "0 191 60",
 				aoe2_weapon1_forward_local = "0 0 1",
 			},

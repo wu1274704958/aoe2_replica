@@ -69,6 +69,7 @@ struct UnitDefWeaponAnchor {
 
 struct UnitDefAnchorSet {
 	float3 aimLocal = ZeroVector;
+	float3 collisionLocal = ZeroVector;
 	std::vector<UnitDefWeaponAnchor> weapons;
 	bool enabled = false;
 };

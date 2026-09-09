@@ -28,6 +28,7 @@ manifest 不包含逐方向、逐帧的手部、弓弦、武器尖端或受击�
 
 ```lua
 aoe2_aim_local = "x y z"
+aoe2_collision_local = "x y z" -- optional; defaults to aim_local
 aoe2_weapon1_muzzle_local = "x y z"
 aoe2_weapon1_forward_local = "x y z"
 ```
@@ -47,6 +48,10 @@ world = unit.pos + unit.rightdir * local.x
 
 `CUnit::PreInit()` 使用 `aim_local` 初始化本地 `aimPos`。随后
 `UpdateMidAndAimPos()` 在引擎方向变化时维护世界 `aimPos`。
+
+`aoe2_collision_local` 可独立指定碰撞体中心；未配置时兼容旧数据并回退到
+`aim_local`。它用于 Sprite 脚点相对于较大碰撞体的底部对齐，不改变受击点、索敌或
+武器 target aimPos。
 
 `CWeapon::UpdateWeaponVectors()` 检测对应 weapon anchor 后直接生成
 `aimFromPos`、`weaponMuzzlePos` 和 `weaponDir`，并跳过
@@ -95,7 +100,8 @@ collision centre  = (0, 30, 0)
 竖轴是 `camera->GetUp()`，它不能直接用于推导世界 Y 碰撞高度。60 是当前标准预览
 摄像机下覆盖身体与头部的待验证校准值，不包含弓、手臂、武器或阴影。碰撞体的
 配置 offset 仍是相对 placeholder S3O 的 `relMidPos`；引擎在 AOE anchor 启用时
-将其转换为 `aim_local - relMidPos`，所以碰撞中心和 aim 点均保持在 `(0,30,0)`。
+将其转换为 `collision_local - relMidPos`。未显式配置时 `collision_local` 回退为
+`aim_local`，因此现有弓手的碰撞中心和 aim 点仍均为 `(0,30,0)`。
 
 当前基础候选换算为 `(right=x*60, up=z*30, front=y*60)`，它将弓手
 `weapon_offset` 转为 `(0,45,30)`。人工导出值等价于再叠加弓手专用修正

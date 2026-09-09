@@ -43,11 +43,16 @@ CONFIG(float, Aoe2UnitPixelsToWorld)
 	.minimumValue(0.01f)
 	.maximumValue(10.0f)
 	.description("Conversion from cached sprite pixels to Recoil world units (AOE2 x2 cache baseline)");
-CONFIG(float, Aoe2UnitMainCameraBias)
-	.defaultValue(4.0f)
+CONFIG(float, Aoe2UnitBelowFootCameraBiasScale)
+	.defaultValue(1.0f)
 	.minimumValue(0.0f)
-	.maximumValue(32.0f)
-	.description("Temporary main-sprite offset toward the camera in world units");
+	.maximumValue(4.0f)
+	.description("Multiplier for the automatic camera-direction depth offset below each AOE2 sprite foot point");
+CONFIG(float, Aoe2UnitBelowFootDepthSafety)
+	.defaultValue(0.02f)
+	.minimumValue(0.0f)
+	.maximumValue(0.25f)
+	.description("Extra relative depth separation for the AOE2 sprite region below its foot point");
 CONFIG(int, Aoe2UnitTestCount)
 	.defaultValue(0)
 	.minimumValue(0)
@@ -162,6 +167,9 @@ struct Instance {
 constexpr std::string_view VERTEX_SHADER = R"GLSL(
 #version 330 core
 uniform mat4 uViewProj;
+uniform vec3 uCameraDir;
+uniform float uBelowFootCameraBiasScale;
+uniform float uBelowFootDepthSafety;
 layout(location = 0) in vec3 vposition;
 layout(location = 1) in vec4 vaxisX;
 layout(location = 2) in vec4 vaxisY;
@@ -177,16 +185,33 @@ vec4 unpackRgba8(uint value) {
 		float((value >> 16u) & 255u), float((value >> 24u) & 255u)) / 255.0;
 }
 void main() {
+	float sourceRow = vgeometry.w;
+	if (vposition.y > 0.5)
+		sourceRow = 0.0;
+	else if (vposition.y < -0.5)
+		sourceRow = vgeometry.y;
+
 	vec2 local = vec2(
 		vposition.x * vgeometry.x + vgeometry.x * 0.5 - vgeometry.z,
-		vposition.y * vgeometry.y + vgeometry.w - vgeometry.y * 0.5);
-	gl_Position = uViewProj * (vorigin + vaxisX * local.x + vaxisY * local.y);
+		vgeometry.w - sourceRow);
+	float belowFootPixels = max(vgeometry.y - vgeometry.w, 0.0);
+	float belowFootT = (belowFootPixels > 0.0)
+		? clamp((sourceRow - vgeometry.w) / belowFootPixels, 0.0, 1.0)
+		: 0.0;
+	// Project the below-foot screen-space distance onto the terrain plane. This
+	// keeps the correction valid as the overhead camera pitch changes: at 45°
+	// it is one world pixel-for-pixel offset, while flatter views receive the
+	// additional camera-direction distance required to clear a flat ground.
+	float bottomDepthOffset = belowFootPixels * max(vaxisY.y, 0.0) /
+		max(-uCameraDir.y, 0.05) * uBelowFootCameraBiasScale * (1.0 + uBelowFootDepthSafety);
+	vec3 worldPosition = vorigin.xyz + vaxisX.xyz * local.x + vaxisY.xyz * local.y;
+	worldPosition -= uCameraDir * (belowFootT * bottomDepthOffset);
+	gl_Position = uViewProj * vec4(worldPosition, 1.0);
 	vec2 p0 = vuv.xy;
 	vec2 p1 = vuv.xy + vuv.zw;
-	if (gl_VertexID == 0) oUv = vec2(p1.x, p0.y);
-	else if (gl_VertexID == 1) oUv = p0;
-	else if (gl_VertexID == 2) oUv = vec2(p0.x, p1.y);
-	else oUv = p1;
+	float footV = mix(p0.y, p1.y, vgeometry.w / vgeometry.y);
+	float sourceV = (vposition.y > 0.5) ? p0.y : ((vposition.y < -0.5) ? p1.y : footV);
+	oUv = vec2((vposition.x > 0.0) ? p1.x : p0.x, sourceV);
 	oColor = unpackRgba8(vmaterial.x);
 	oPlayer = clamp(vmaterial.y & 15u, 1u, 8u);
 }
@@ -475,7 +500,8 @@ public:
 
 	std::filesystem::path cacheRoot;
 	float pixelsToWorld = 1.0f;
-	float mainCameraBias = 0.0f;
+	float belowFootCameraBiasScale = 1.0f;
+	float belowFootDepthSafety = 0.02f;
 	std::vector<std::unique_ptr<Appearance>> appearances;
 	std::vector<Instance> instances;
 	std::vector<std::uint32_t> freeInstances;
@@ -532,19 +558,28 @@ bool Aoe2RendererImpl::Init()
 	}
 	cacheRoot = cacheRoot.lexically_normal();
 	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
-	mainCameraBias = configHandler->GetFloat("Aoe2UnitMainCameraBias");
+	belowFootCameraBiasScale = configHandler->GetFloat("Aoe2UnitBelowFootCameraBiasScale");
+	belowFootDepthSafety = configHandler->GetFloat("Aoe2UnitBelowFootDepthSafety");
 	diagnosticsEnabled = configHandler->GetBool("Aoe2UnitDiagnostics");
 	if (!std::filesystem::exists(cacheRoot)) {
 		LOG_L(L_WARNING, "[Aoe2UnitRenderer] cache root does not exist: %s", cacheRoot.string().c_str());
 		return false;
 	}
+	// Three horizontal rows let the main sprite keep its foot point fixed while
+	// progressively moving only the portion below it toward the camera. The
+	// foot row is resolved per frame in the vertex shader from Frame::footY.
 	static constexpr float quadVertices[] = {
-		 0.5f,  0.5f, 0.0f,
-		-0.5f,  0.5f, 0.0f,
-		-0.5f, -0.5f, 0.0f,
-		 0.5f, -0.5f, 0.0f,
+		 0.5f,  1.0f, 0.0f, // top right
+		-0.5f,  1.0f, 0.0f, // top left
+		-0.5f,  0.0f, 0.0f, // foot left
+		 0.5f,  0.0f, 0.0f, // foot right
+		-0.5f, -1.0f, 0.0f, // bottom left
+		 0.5f, -1.0f, 0.0f, // bottom right
 	};
-	static constexpr std::uint32_t quadIndices[] = {0, 1, 2, 0, 2, 3};
+	static constexpr std::uint32_t quadIndices[] = {
+		0, 1, 2, 0, 2, 3,
+		3, 2, 4, 3, 4, 5,
+	};
 	glGenBuffers(1, &quadVbo);
 	glBindBuffer(GL_ARRAY_BUFFER, quadVbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
@@ -562,8 +597,8 @@ bool Aoe2RendererImpl::Init()
 	}
 
 	CreateTestGrid();
-	LOG_L(L_INFO, "[Aoe2UnitRenderer] initialized (cache=%s, testInstances=%u, mainCameraBias=%.2f)",
-		cacheRoot.string().c_str(), static_cast<unsigned>(testHandles.size()), mainCameraBias);
+	LOG_L(L_INFO, "[Aoe2UnitRenderer] initialized (cache=%s, testInstances=%u, belowFootCameraBiasScale=%.2f, belowFootDepthSafety=%.3f)",
+		cacheRoot.string().c_str(), static_cast<unsigned>(testHandles.size()), belowFootCameraBiasScale, belowFootDepthSafety);
 	return true;
 }
 
@@ -1010,11 +1045,10 @@ void Aoe2RendererImpl::RebuildBatches()
 			{axisY.x, axisY.y, axisY.z, 0.0f},
 			{instance.position.x, instance.position.y, instance.position.z, 1.0f},
 		};
-		const float3 mainPosition = instance.position - camera->GetDir() * mainCameraBias;
 		const WorldInstance mainWorld{
 			{axisX.x, axisX.y, axisX.z, 0.0f},
 			{axisY.x, axisY.y, axisY.z, 0.0f},
-			{mainPosition.x, mainPosition.y, mainPosition.z, 1.0f},
+			{instance.position.x, instance.position.y, instance.position.z, 1.0f},
 		};
 		const auto makeVisual = [&](const Frame& frame) {
 			return VisualInstance{
@@ -1036,10 +1070,11 @@ void Aoe2RendererImpl::RebuildBatches()
 void Aoe2RendererImpl::Update()
 {
 	const auto started = std::chrono::steady_clock::now();
-	// Keep this lightweight renderer-only setting live so the anchor calibration
-	// scenes can tune sprite placement without restarting or touching synced state.
+	// Keep these lightweight renderer-only settings live so calibration scenes
+	// can tune sprite placement without restarting or touching synced state.
 	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
-	mainCameraBias = configHandler->GetFloat("Aoe2UnitMainCameraBias");
+	belowFootCameraBiasScale = configHandler->GetFloat("Aoe2UnitBelowFootCameraBiasScale");
+	belowFootDepthSafety = configHandler->GetFloat("Aoe2UnitBelowFootDepthSafety");
 	const float deltaSeconds = std::clamp(globalRendering->lastFrameTime * 0.001f, 0.0f, 0.1f);
 	testElapsed += deltaSeconds;
 	if (!testHandles.empty() && !testCameraConfigured && camHandler != nullptr &&
@@ -1225,6 +1260,10 @@ void Aoe2RendererImpl::DrawBatch(const Animation& animation, GpuBatch& batch, bo
 	auto* shader = shadow ? shadowShader : mainShader;
 	auto token = shader->EnableScoped();
 	shader->SetUniformMatrix4x4("uViewProj", false, camera->GetViewProjectionMatrix().m);
+	const float3 cameraDir = camera->GetDir();
+	shader->SetUniform("uCameraDir", cameraDir.x, cameraDir.y, cameraDir.z);
+	shader->SetUniform("uBelowFootCameraBiasScale", shadow ? 0.0f : belowFootCameraBiasScale);
+	shader->SetUniform("uBelowFootDepthSafety", shadow ? 0.0f : belowFootDepthSafety);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, shadow ? animation.shadow.texture : animation.main.texture);
 	if (!shadow) {
@@ -1233,7 +1272,7 @@ void Aoe2RendererImpl::DrawBatch(const Animation& animation, GpuBatch& batch, bo
 		glActiveTexture(GL_TEXTURE0);
 	}
 	glBindVertexArray(batch.vao);
-	glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batch.world.size()));
+	glDrawElementsInstanced(GL_TRIANGLES, 12, GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batch.world.size()));
 	glBindVertexArray(0);
 	++diagnostics.drawCalls;
 	++diagnostics.batches;
