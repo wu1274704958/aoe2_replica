@@ -18,4 +18,11 @@ return {
 		unitTags = { "cavalry" },
 		armor = { melee = 1, pierce = 1 },
 	},
+	castle_rapid_fire = {
+		-- Absolute per-unit weapon-state override. The base Castle starts with
+		-- burst=5; completing this technology upgrades its single native weapon
+		-- to a 10-arrow temporal burst without adding a second AOE AttackA.
+		weaponTags = { "castle" },
+		weaponState = { burst = 10 },
+	},
 }

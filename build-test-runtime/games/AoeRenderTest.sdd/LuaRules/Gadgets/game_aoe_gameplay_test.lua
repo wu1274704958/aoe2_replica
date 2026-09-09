@@ -75,6 +75,7 @@ local positionDiagnosticSamplesPerTeam = math.floor(ReadNumberOption("aoe_positi
 local explicitMoveRegressionEnabled = ReadBooleanOption("aoe_explicit_move_regression", false)
 local attackCannotMoveConfigured = ReadBooleanOption("aoe_attack_cannot_move", true)
 local armorUpgradeTestEnabled = ReadBooleanOption("aoe_armor_upgrade_test", false)
+local castleRapidFireUpgradeTestEnabled = ReadBooleanOption("aoe_castle_rapid_fire_upgrade_test", false)
 local statusLogPeriod = 150
 local eliminationCheckPeriod = 15
 local stalledDistanceThreshold = 128
@@ -1017,6 +1018,11 @@ function gadget:GameFrame(frame)
 		GG.AoeArmor.ApplyTeamUpgrade(0, "fletching")
 		GG.AoeArmor.ApplyTeamUpgrade(1, "padded_archer_armor")
 		Spring.Echo("[AOE Armor Test] applied Team A fletching and Team B padded archer armor")
+	end
+	if castleRapidFireUpgradeTestEnabled and frame == 60 and GG.AoeArmor ~= nil then
+		GG.AoeArmor.ApplyTeamUpgrade(0, "castle_rapid_fire")
+		GG.AoeArmor.ApplyTeamUpgrade(1, "castle_rapid_fire")
+		Spring.Echo("[AOE Castle Test] applied castle_rapid_fire (burst=10) to both teams")
 	end
 
 	if buildingTest or anchorCalibration or meleeCalibration or meleeBattle then

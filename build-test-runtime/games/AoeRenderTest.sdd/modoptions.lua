@@ -155,4 +155,10 @@ return {
 		type = "bool",
 		def = false,
 	},
+	aoe_castle_rapid_fire_upgrade_test = {
+		name = "AOE castle rapid-fire technology test",
+		desc = "Apply castle_rapid_fire: upgrade native castle arrow bursts from 5 to 10 shots",
+		type = "bool",
+		def = false,
+	},
 }

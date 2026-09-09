@@ -73,6 +73,7 @@ Attack Move；不是对每个单位重复下相同目标点。两队不同 AllyT
 | `aoe_position_diagnostic_samples` | `64` | 每队诊断抽样上限；范围 1–128。 |
 | `aoe_explicit_move_regression` | `false` | 开启专项回归：在抽样弓手 Windup/Recovery 发原生 `CMD.MOVE`，验证显式移动可以取消攻击状态。正常双队观察应保持 `false`。 |
 | `aoe_armor_upgrade_test` | `false` | 队伍生成后应用 `aoe_upgrades.lua` 中配置的攻击/护甲升级，用于护甲机制回归。 |
+| `aoe_castle_rapid_fire_upgrade_test` | `false` | 第 60 帧为两队应用 `castle_rapid_fire`；城堡箭矢连射由 5 发提升至 10 发。 |
 
 `_script.txt` 还包含 Blank Map 的 `[mapoptions]`：`blank_map_x`、`blank_map_y` 控制地图
 尺寸，`blank_map_height` 控制平坦地面高度，`blank_map_color_r/g/b` 是未启用测试地表时的

@@ -42,15 +42,27 @@ after firing affects subsequent projectiles but not arrows already in flight.
 ## Technologies
 
 `LuaRules/Configs/aoe_upgrades.lua` maps a technology ID to tag selectors and
-integer deltas. `weaponTags` select WeaponDefs for attack deltas and `unitTags`
-select UnitDefs for armor deltas. A selector matches when any tag matches.
+integer deltas or native weapon-state overrides. `weaponTags` select WeaponDefs
+for attack and weapon-state changes and `unitTags` select UnitDefs for armor
+deltas. A selector matches when any tag matches.
 
 ```lua
 fletching = {
   weaponTags = { "archer" },
   damage = { pierce = 1 },
 }
+
+castle_rapid_fire = {
+  weaponTags = { "castle" },
+  weaponState = { burst = 10 },
+}
 ```
+
+`weaponState` values are absolute native weapon values, applied through the
+synchronized `Spring.SetUnitWeaponState` API. The Castle's base WeaponDef has
+`burst = 5` and `burstRate = 0.12`; `castle_rapid_fire` changes only `burst`
+to `10`, retaining the cadence. This deliberately keeps the Castle in one
+weapon slot, so the AOE bridge continues to drive one `AttackA` animation.
 
 The synced upgrade gadget exposes:
 

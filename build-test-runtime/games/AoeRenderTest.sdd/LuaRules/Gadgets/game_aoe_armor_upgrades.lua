@@ -1,11 +1,11 @@
 function gadget:GetInfo()
 	return {
-		name = "AOE Armor Upgrades",
-		desc = "Applies configured AOE2-style class attack and armor upgrades",
+		name = "AOE Gameplay Upgrades",
+		desc = "Applies configured AOE2-style class attack, armor, and weapon-state upgrades",
 		author = "OpenAI Codex",
 		license = "GPL v2 or later",
 		layer = -10,
-		enabled = Spring.AddUnitAoeArmor ~= nil and Spring.AddUnitAoeWeaponDamage ~= nil,
+		enabled = Spring.SetUnitWeaponState ~= nil,
 	}
 end
 
@@ -39,18 +39,25 @@ local function ApplyUpgradeToUnit(unitID, unitDefID, upgrade)
 		return
 	end
 
-	if upgrade.armor ~= nil and HasAnyTag(unitDef.aoeUpgradeTags, upgrade.unitTags) then
+	if upgrade.armor ~= nil and Spring.AddUnitAoeArmor ~= nil and HasAnyTag(unitDef.aoeUpgradeTags, upgrade.unitTags) then
 		Spring.AddUnitAoeArmor(unitID, upgrade.armor)
 	end
 
-	if upgrade.damage == nil then
+	if upgrade.damage == nil and upgrade.weaponState == nil then
 		return
 	end
 
 	for weaponNum, unitWeapon in ipairs(unitDef.weapons or {}) do
 		local weaponDef = WeaponDefs[unitWeapon.weaponDef]
 		if weaponDef ~= nil and HasAnyTag(weaponDef.aoeUpgradeTags, upgrade.weaponTags) then
-			Spring.AddUnitAoeWeaponDamage(unitID, weaponNum, upgrade.damage)
+			if upgrade.damage ~= nil and Spring.AddUnitAoeWeaponDamage ~= nil then
+				Spring.AddUnitAoeWeaponDamage(unitID, weaponNum, upgrade.damage)
+			end
+			if upgrade.weaponState ~= nil then
+				for stateName, stateValue in pairs(upgrade.weaponState) do
+					Spring.SetUnitWeaponState(unitID, weaponNum, stateName, stateValue)
+				end
+			end
 		end
 	end
 end
