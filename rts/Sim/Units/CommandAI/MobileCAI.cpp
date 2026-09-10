@@ -733,6 +733,14 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	float edgeFactor = 0.0f; // percent offset to target center
 
 	const float3 targetMidPosVec = owner->midPos - orderTarget->midPos;
+	const bool useUnitCenterFacing = (
+		owner->unitDef->attackCannotMove &&
+		owner->weapons.size() == 1 &&
+		owner->weapons.front()->onlyForward
+	);
+	const float3 targetFacingPos = useUnitCenterFacing ? float3(orderTarget->pos) : float3(orderTarget->midPos);
+	const float3 targetFacingOrigin = useUnitCenterFacing ? float3(owner->pos) : float3(owner->midPos);
+	const float3 targetFacingVec = targetFacingOrigin - targetFacingPos;
 	const float3 targetErrPos = orderTarget->GetErrorPos(owner->allyteam, false);
 
 	const float targetGoalDist = targetErrPos.SqDistance2D(owner->moveType->goalPos);
@@ -755,7 +763,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	orderTgtInfo.isUserTarget = (!c.IsInternalOrder());
 	orderTgtInfo.isManualFire = (c.GetID() == CMD_MANUALFIRE);
 
-	const short targetHeading = GetHeadingFromVector(-targetMidPosVec.x, -targetMidPosVec.z);
+	const short targetHeading = GetHeadingFromVector(-targetFacingVec.x, -targetFacingVec.z);
 
 	assert(c.GetID() != CMD_MANUALFIRE || (!owner->weapons.empty() && owner->unitDef->canManualFire));
 
@@ -788,7 +796,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 			StopMove();
 
 			if (gs->frameNum > (lastCloseInTry + MAX_CLOSE_IN_RETRY_TICKS))
-				owner->moveType->KeepPointingTo(orderTarget->midPos, minPointingDist, true);
+				owner->moveType->KeepPointingTo(targetFacingPos, minPointingDist, true);
 		}
 
 		owner->AttackUnit(orderTgtInfo.unit, orderTgtInfo.isUserTarget, orderTgtInfo.isManualFire);
@@ -809,7 +817,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	if (targetMidPosDist2D < (owner->maxRange * 0.9f)) {
 		if (owner->unitDef->IsHoveringAirUnit() || (targetMidPosVec.SqLength2D() < 1024) || tryOwnerRotation) {
 			StopMove();
-			owner->moveType->KeepPointingTo(orderTarget->midPos, minPointingDist, true);
+			owner->moveType->KeepPointingTo(targetFacingPos, minPointingDist, true);
 			return;
 		}
 
@@ -846,7 +854,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 		SetGoal(targetErrPos - norm * CalcTargetRadius(orderTarget, orderTarget->radius, edgeFactor * 0.8f), owner->pos);
 		if (lastCloseInTry < (gs->frameNum + MAX_CLOSE_IN_RETRY_TICKS)) {
 			if (tryOwnerRotation)
-				owner->moveType->KeepPointingTo(orderTarget->midPos, minPointingDist, true);
+				owner->moveType->KeepPointingTo(targetFacingPos, minPointingDist, true);
 
 			lastCloseInTry = gs->frameNum;
 		}

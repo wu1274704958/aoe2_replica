@@ -1470,31 +1470,13 @@ bool CUnit::IsAttackCollisionLocked() const
 		return false;
 	}
 
-	// Windup, release, recovery, and the stopping phase already lock both
-	// self-movement and collision displacement.
-	if (IsAttackMovementLocked())
-		return true;
-
-	// Between attack cycles the motion phase returns to Mobile. Keep a stopped
-	// unit stable while the first weapon, its owning Unit, or CommandAI retains
-	// the attack engagement. The Unit target bridges short HoldIfTargetInvalid
-	// gaps, while inCommand bridges the deterministic target-death handoff before
-	// an internal CMD_ATTACK is removed and its return-Fight resumes. This
-	// predicate only suppresses external collision displacement; it does not block
-	// the unit's own path movement, and naturally turns false once acceleration
-	// exceeds the attack-start threshold. AOE attack animation is intentionally
-	// driven only by the first weapon.
-	if (
-		moveType == nullptr ||
-		!IsAttackStartSpeedSatisfied() ||
-		weapons.empty()
-	) {
-		return false;
-	}
-
-	const CWeapon* weapon = weapons.front();
-	const bool attackCommandActive = (commandAI != nullptr && commandAI->inCommand == CMD_ATTACK);
-	return (attackCommandActive || HaveTarget() || (weapon != nullptr && weapon->HaveTarget()));
+	// A retained target or an active CMD.ATTACK is an engagement, not an attack
+	// action.  Do not let either keep collision displacement disabled after a
+	// burst has finished: while Mobile the unit must be free to pursue, re-path,
+	// and be pushed normally.  StoppingForAttack is retained because it is the
+	// short, already-validated brake immediately preceding Windup; all other
+	// locked phases correspond to an active windup, release, or recovery.
+	return IsAttackMovementLocked();
 }
 
 bool CUnit::IsAttackAnimationActive() const

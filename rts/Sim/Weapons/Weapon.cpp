@@ -400,7 +400,17 @@ bool CWeapon::CheckAimingAngle() const
 	RECOIL_DETAILED_TRACY_ZONE;
 	// check fire angle constraints
 	// TODO: write a per-weapontype CheckAim()?
-	const float3 worldTargetDir = (currentTargetPos - owner->pos).SafeNormalize();
+	const bool useUnitCenterFacing = (
+		onlyForward &&
+		weaponNum == 0 &&
+		owner->unitDef->attackCannotMove &&
+		owner->weapons.size() == 1 &&
+		currentTarget.type == Target_Unit &&
+		currentTarget.unit != nullptr
+	);
+	const float3 worldTargetDir = useUnitCenterFacing
+		? ((currentTarget.unit->pos - owner->pos) * XZVector).SafeNormalize()
+		: (currentTargetPos - owner->pos).SafeNormalize();
 	const float3 worldMainDir = owner->GetObjectSpaceVec(mainDir);
 
 	// weapon finished a previously started AimWeapon thread and wants to
@@ -1191,8 +1201,24 @@ bool CWeapon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
 	if (targetDist > (weaponRange * weaponRange))
 		return false;
 
+	// A strict stationary AOE unit rotates its body toward the target Unit's
+	// center. targetBorder remains a range and projectile-impact concern; when
+	// the muzzle is inside the target volume it must not make this direction
+	// degenerate. All other weapon paths retain the original aimFrom-based test.
+	const bool useUnitCenterFacing = (
+		onlyForward &&
+		weaponNum == 0 &&
+		owner->unitDef->attackCannotMove &&
+		owner->weapons.size() == 1 &&
+		trg.type == Target_Unit &&
+		trg.unit != nullptr
+	);
+	const float3 targetAngleDir = useUnitCenterFacing
+		? ((trg.unit->pos - owner->pos) * XZVector).SafeNormalize()
+		: (tgtPos - aimFromPos).SafeNormalize();
+
 	// NOTE: mainDir is in unit-space
-	return (CheckTargetAngleConstraint((tgtPos - aimFromPos).SafeNormalize(), owner->GetObjectSpaceVec(mainDir)));
+	return (CheckTargetAngleConstraint(targetAngleDir, owner->GetObjectSpaceVec(mainDir)));
 }
 
 
@@ -1248,15 +1274,23 @@ bool CWeapon::TryTargetRotate(const CUnit* unit, bool userTarget, bool manualFir
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const float3 tempTargetPos = GetUnitLeadTargetPos(unit);
+	const bool useUnitCenterFacing = (
+		onlyForward &&
+		weaponNum == 0 &&
+		owner->unitDef->attackCannotMove &&
+		owner->weapons.size() == 1
+	);
 	SWeaponTarget trg(unit, userTarget);
 	trg.isManualFire = manualFire;
 
 	const short weaponHeading = GetHeadingFromVector(mainDir.x, mainDir.z);
-	const auto aimToTgt = float3{
-		tempTargetPos.x - aimFromPos.x,
-		0.0f,
-		tempTargetPos.z - aimFromPos.z
-	};
+	const auto aimToTgt = useUnitCenterFacing
+		? ((unit->pos - owner->pos) * XZVector)
+		: float3{
+			tempTargetPos.x - aimFromPos.x,
+			0.0f,
+			tempTargetPos.z - aimFromPos.z
+		};
 
 	// if the aimToTgt is (close to) degenerate then enemyHeading value makes no sense,
 	// use the owner's heading instead
