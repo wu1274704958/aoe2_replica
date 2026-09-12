@@ -161,4 +161,10 @@ return {
 		type = "bool",
 		def = false,
 	},
+	aoe_chukonu_test = {
+		name = "AOE Chu Ko Nu salvo test",
+		desc = "Fire the Chu Ko Nu at a static target and verify per-arrow salvo damage, before and after fletching",
+		type = "bool",
+		def = false,
+	},
 }

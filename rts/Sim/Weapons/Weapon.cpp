@@ -625,6 +625,7 @@ void CWeapon::UpdateSalvo()
 		return;
 
 	salvoLeft--;
+	const int salvoIndex = salvoSize - salvoLeft - 1;
 	nextSalvo = gs->frameNum + salvoDelay;
 
 	if (burstControlWhenOutOfArc) {
@@ -674,8 +675,15 @@ void CWeapon::UpdateSalvo()
 		UpdateWeaponPieces(false); // calls script->QueryWeapon()
 		UpdateWeaponVectors();
 
+#if SUPPORT_AOE_ARMOR
+		currentAoeSalvoDamageIndex = salvoIndex;
+#endif
 		Fire(false);
 	}
+
+#if SUPPORT_AOE_ARMOR
+	currentAoeSalvoDamageIndex = -1;
+#endif
 
 	owner->NotifyAttackReleased(this, salvoLeft == 0);
 
@@ -1437,6 +1445,10 @@ ProjectileParams CWeapon::GetProjectileParams()
 	params.owner = owner;
 	params.weaponDef = weaponDef;
 
+#if SUPPORT_AOE_ARMOR
+	params.damages = GetAoeSalvoDamageProfile();
+#endif
+
 	switch (currentTarget.type) {
 		case Target_None     : {                                          } break;
 		case Target_Unit     : { params.target = currentTarget.unit;      } break;
@@ -1446,6 +1458,22 @@ ProjectileParams CWeapon::GetProjectileParams()
 
 	return params;
 }
+
+
+#if SUPPORT_AOE_ARMOR
+const DynDamageArray* CWeapon::GetAoeSalvoDamageProfile() const
+{
+	if (currentAoeSalvoDamageIndex < 0)
+		return nullptr;
+
+	const auto& profiles = weaponDef->aoeSalvoDamageProfiles;
+	if (currentAoeSalvoDamageIndex >= profiles.size())
+		return nullptr;
+
+	const auto& profile = profiles[currentAoeSalvoDamageIndex];
+	return profile.inheritWeaponDamage? damages: &profile.damages;
+}
+#endif
 
 
 

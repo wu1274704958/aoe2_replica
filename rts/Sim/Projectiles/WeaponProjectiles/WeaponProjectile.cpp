@@ -144,7 +144,12 @@ CWeaponProjectile::CWeaponProjectile(const ProjectileParams& params)
 		allyteamID = teamHandler.IsValidTeam(teamID)? teamHandler.AllyTeam(teamID): -1;
 	}
 
-	if (ownerID != -1u && weaponNum != -1u) {
+#if SUPPORT_AOE_ARMOR
+	if (params.damages != nullptr)
+		damages = DynDamageArray::IncRef(params.damages);
+#endif
+
+	if (damages == nullptr && ownerID != -1u && weaponNum != -1u) {
 		const CUnit* owner = unitHandler.GetUnit(ownerID);
 		const CWeapon* weapon = (owner != nullptr && weaponNum < owner->weapons.size())? owner->weapons[weaponNum]: nullptr;
 

@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <vector>
+
 #include "Sim/Misc/DamageArray.h"
 #include "Sim/Misc/GuiSoundSet.h"
 #include "Sim/Projectiles/WeaponProjectiles/WeaponProjectileTypes.h"
@@ -72,6 +74,18 @@ public:
 	float predictBoost;        ///< replaces hardcoded behaviour for burnblow cannons
 
 	DynDamageArray damages;
+
+#if SUPPORT_AOE_ARMOR
+	// A per-salvo damage profile is immutable definition data. Entries marked
+	// inheritWeaponDamage use the owning CWeapon's mutable damage array so
+	// runtime AOE upgrades continue to affect that shot.
+	struct AoeSalvoDamageProfile {
+		DynDamageArray damages;
+		bool inheritWeaponDamage = false;
+	};
+
+	std::vector<AoeSalvoDamageProfile> aoeSalvoDamageProfiles;
+#endif
 
 	float fireStarter;
 	bool noSelfDamage;

@@ -7,6 +7,7 @@
 
 class CWorldObject;
 class CUnit;
+class DynDamageArray;
 struct S3DModel;
 struct WeaponDef;
 
@@ -24,6 +25,12 @@ struct ProjectileParams {
 	S3DModel* model = nullptr;
 
 	const WeaponDef* weaponDef = nullptr;
+
+#if SUPPORT_AOE_ARMOR
+	// Optional immutable damage profile selected by the firing weapon for this
+	// projectile. A null value keeps the existing weapon-instance behavior.
+	const DynDamageArray* damages = nullptr;
+#endif
 
 	unsigned int ownerID = -1u;
 	unsigned int teamID = -1u;
@@ -43,4 +50,3 @@ struct ProjectileParams {
 };
 
 #endif
-

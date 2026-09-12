@@ -119,6 +119,10 @@ protected:
 	virtual float GetPredictedImpactTime(const float3& p) const; //< how long time we predict it take for a projectile to reach target
 
 	ProjectileParams GetProjectileParams();
+
+#if SUPPORT_AOE_ARMOR
+	const DynDamageArray* GetAoeSalvoDamageProfile() const;
+#endif
 	static bool TargetUnderWater(const float3& tgtPos, const SWeaponTarget&);
 	static bool TargetInWater(const float3& tgtPos, const SWeaponTarget&);
 
@@ -220,6 +224,12 @@ public:
 	float3 salvoError;                      // error vector for the whole salvo
 	float3 errorVector;
 	float3 errorVectorAdd;
+
+#if SUPPORT_AOE_ARMOR
+	// Valid only while UpdateSalvo is synchronously constructing projectile(s).
+	// It intentionally is not serialized state.
+	int currentAoeSalvoDamageIndex = -1;
+#endif
 
 #if AOE_DEV_TOOL
 	float3 aoe2MuzzleOverride;

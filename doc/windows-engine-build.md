@@ -182,5 +182,8 @@ $writeDir = "D:\runtime\aoe-test-write-dir"
 - `aoe-attack-regression-test.txt`：8v1 的 `attackCannotMove` 专项回归；可通过
   `aoe_explicit_move_regression` 验证显式 Move 在 Windup/Recovery 取消攻击。
 - `aoe-building-test.txt`：四个方向的原生 AOE 箭塔、锚点/碰撞预览和塔 Projectile 验证。
+- `aoe-chukonu-test.txt`：诸葛连弩每轮 3 箭的逐发伤害验收（`aoe_chukonu_test`），
+  断言首箭满伤、后两箭各 3，并再次断言 `fletching` 只提升首箭；结果以
+  `[AOE Chu Ko Nu Test] PASS|FAIL` 打进 infolog。
 
 这些专项模式不要与双队 Attack Move 的 `_script.txt` 混用。

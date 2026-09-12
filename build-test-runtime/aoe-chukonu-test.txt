@@ -1,0 +1,58 @@
+[GAME]
+{
+	[ALLYTEAM0]
+	{
+		NumAllies=0;
+	}
+	[ALLYTEAM1]
+	{
+		NumAllies=0;
+	}
+	[TEAM0]
+	{
+		AllyTeam=0;
+		TeamLeader=0;
+		RGBColor=0.20 0.65 1.00;
+	}
+	[TEAM1]
+	{
+		AllyTeam=1;
+		TeamLeader=0;
+		RGBColor=0.95 0.25 0.20;
+	}
+	[PLAYER0]
+	{
+		Name=RecoilChuKoNuTest;
+		Spectator=0;
+		Team=0;
+	}
+	[MODOPTIONS]
+	{
+		LuaGaia=0;
+		LuaRules=1;
+		aoe_fixed_test_camera=1;
+		aoe_orthographic_test_camera=1;
+		aoe_global_los=1;
+		aoe_chukonu_test=1;
+	}
+	[MAPOPTIONS]
+	{
+		blank_map_x=20;
+		blank_map_y=10;
+		blank_map_height=32;
+		blank_map_color_r=72;
+		blank_map_color_g=112;
+		blank_map_color_b=72;
+	}
+	GameType=AOE Render Test 0.6;
+	MapName=AOE Blank Map Test;
+	MyPlayerName=RecoilChuKoNuTest;
+	NumAllyTeams=2;
+	NumTeams=2;
+	NumPlayers=1;
+	StartPosType=0;
+	FixedRNGSeed=1;
+	GameStartDelay=0;
+	IsHost=1;
+	InitBlank=1;
+}

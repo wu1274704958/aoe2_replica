@@ -70,6 +70,7 @@ local buildingTest = ReadBooleanOption("aoe_building_test", false)
 local teamTowersEnabled = ReadBooleanOption("aoe_team_towers", false)
 local meleeCalibration = ReadBooleanOption("aoe_melee_calibration", false)
 local meleeBattle = ReadBooleanOption("aoe_melee_battle", false)
+local chukonuTest = ReadBooleanOption("aoe_chukonu_test", false)
 local positionDiagnosticEnabled = ReadBooleanOption("aoe_position_diagnostics", true)
 local positionDiagnosticSamplesPerTeam = math.floor(ReadNumberOption("aoe_position_diagnostic_samples", 64, 1, 128))
 local explicitMoveRegressionEnabled = ReadBooleanOption("aoe_explicit_move_regression", false)
@@ -963,7 +964,7 @@ local function SpawnAnchorValidation()
 end
 
 function gadget:GameStart()
-	if buildingTest or meleeCalibration or meleeBattle then
+	if buildingTest or meleeCalibration or meleeBattle or chukonuTest then
 		return
 	end
 

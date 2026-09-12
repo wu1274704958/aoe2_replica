@@ -507,6 +507,57 @@ WeaponDef::WeaponDef(const LuaTable& wdTable, const std::string& name_, int id_)
 			damages.dynDamageRange = range;
 	}
 
+#if SUPPORT_AOE_ARMOR
+	{
+		const LuaTable salvoDamageTable = wdTable.SubTable("aoeSalvoDamage");
+		if (salvoDamageTable.IsValid()) {
+			const int profileCount = salvoDamageTable.GetLength();
+			if (profileCount != salvosize) {
+				LOG_L(L_WARNING, "WeaponDef %s aoeSalvoDamage has %d entries but burst is %d; ignoring salvo damage profiles", name.c_str(), profileCount, salvosize);
+			} else {
+				aoeSalvoDamageProfiles.reserve(profileCount);
+
+				for (int index = 1; index <= profileCount; ++index) {
+					const LuaTable profileTable = salvoDamageTable.SubTable(index);
+					if (!profileTable.IsValid()) {
+						LOG_L(L_WARNING, "WeaponDef %s aoeSalvoDamage[%d] must be a table; ignoring salvo damage profiles", name.c_str(), index);
+						aoeSalvoDamageProfiles.clear();
+						break;
+					}
+
+					auto& profile = aoeSalvoDamageProfiles.emplace_back();
+					profile.inheritWeaponDamage = profileTable.GetBool("inheritWeaponDamage", false);
+					if (profile.inheritWeaponDamage)
+						continue;
+
+					const LuaTable profileDamageTable = profileTable.SubTable("damage");
+					const LuaTable profileAoeDamageTable = profileTable.SubTable("aoeDamage");
+					if (!profileDamageTable.IsValid() || !profileAoeDamageTable.IsValid()) {
+						LOG_L(L_WARNING, "WeaponDef %s aoeSalvoDamage[%d] requires damage and aoeDamage tables; ignoring salvo damage profiles", name.c_str(), index);
+						aoeSalvoDamageProfiles.clear();
+						break;
+					}
+
+					profile.damages = damages;
+					profile.damages.refCount = 1;
+					profile.damages.fromDef = true;
+					profile.damages.SetDefaultDamage(profileDamageTable.GetFloat("default", damages.GetDefault()));
+
+					std::vector<std::pair<std::string, float>> profileDamages;
+					profileDamageTable.GetPairs(profileDamages);
+					for (const auto& [armorTypeName, damage]: profileDamages) {
+						const int armorType = damageArrayHandler.GetTypeFromName(armorTypeName);
+						if (armorType != 0)
+							profile.damages.Set(armorType, damage);
+					}
+
+					ParseAoeDamageEntries(profileAoeDamageTable, profile.damages.GetAoeDamage(), name.c_str());
+				}
+			}
+		}
+	}
+#endif
+
 	{
 		// 0.78.2.1 backwards compatibility: non-burst beamlasers play one
 		// sample per shot, not for each individual beam making up the shot
