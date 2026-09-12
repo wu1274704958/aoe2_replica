@@ -9,12 +9,19 @@ function gadget:GetInfo()
 	}
 end
 
-local CALIBRATION_UNIT_NAME = "aoe_archer"
+local CALIBRATION_UNIT_NAME = "aoe_chukonu"
 local CALIBRATION_DIRECTION_COUNT = 16
 local CALIBRATION_COLUMNS = 4
 local SNAPSHOT_PERIOD = 15
 local GROUND_ATTACK_START_FRAME = 30
-local GROUND_ATTACK_DISTANCE = 180
+-- Every calibration unit gets its own hostile target. Keeping that target on
+-- the unit's forward axis and inside weapon range makes all 16 sprite sectors
+-- test the native object-attack path without asking units to form up first.
+local CALIBRATION_TARGET_UNIT_NAME = "aoe_spearman"
+local CALIBRATION_TARGET_TEAM = 1
+local CALIBRATION_TARGET_HEALTH = 100000
+local CALIBRATION_TARGET_DISTANCE = 180
+local CALIBRATION_TARGET_EDGE_MARGIN = 32
 local CONTROL_MESSAGE_PREFIX = "aoe_anchor_calibration:"
 local CALIBRATION_BASE_MUZZLE_LOCAL = { 0, 45, 30 }
 
@@ -382,7 +389,7 @@ return {
 		gl.Text(string.format("selected direction: %02d    [Tab] next    [R] reset    [E] export + clipboard", selectedIndex), x, y, 12, "o")
 		y = y - 17
 		gl.Color(calibrationGroundAttack and 0.35 or 1, calibrationGroundAttack and 1 or 0.75, 0.35, 1)
-		gl.Text(string.format("[G] forward ground attack: %s", calibrationGroundAttack and "ON" or "OFF"), x, y, 12, "o")
+		gl.Text(string.format("[G] 16 forward hostile-target attacks: %s", calibrationGroundAttack and "ON" or "OFF"), x, y, 12, "o")
 		y = y - 17
 		gl.Color(1, 1, 1, 1)
 		gl.Text("[Up/Down] field    [Left/Right] adjust    [Shift] x10    heading is real; others are preview", x, y, 11, "o")
@@ -486,6 +493,7 @@ return {
 end
 
 local calibrationUnits = {}
+local calibrationTargets = {}
 local calibrationSpacing = ReadNumberOption(options, "aoe_anchor_calibration_spacing", 260, 64, 1024)
 local runtimeMuzzleOverride = nil
 local setRuntimeMuzzleOverride = Spring.SetUnitAoe2WeaponMuzzleOverride
@@ -533,46 +541,87 @@ local function ApplyRuntimeMuzzleOverride()
 	PublishRuntimeMuzzleOverrideState()
 end
 
-local function GiveForwardGroundAttack(unitID)
-	if not Spring.ValidUnitID(unitID) then
+local function GiveHostileTargetAttack(index, unitID)
+	local targetID = calibrationTargets[index]
+	if not Spring.ValidUnitID(unitID) or not Spring.ValidUnitID(targetID) then
 		return false
 	end
-	local unitX, _, unitZ = Spring.GetUnitPosition(unitID)
-	local frontX, _, frontZ = Spring.GetUnitDirection(unitID)
-	if unitX == nil or frontX == nil then
-		return false
-	end
-	local targetX = math.max(0, math.min(Game.mapSizeX, unitX + frontX * GROUND_ATTACK_DISTANCE))
-	local targetZ = math.max(0, math.min(Game.mapSizeZ, unitZ + frontZ * GROUND_ATTACK_DISTANCE))
-	local targetY = Spring.GetGroundHeight(targetX, targetZ)
-	return Spring.GiveOrderToUnit(unitID, CMD.ATTACK, { targetX, targetY, targetZ }, {})
+	return Spring.GiveOrderToUnit(unitID, CMD.ATTACK, { targetID }, {})
 end
 
-local function GiveCalibrationGroundAttacks()
+local function GiveCalibrationHostileTargetAttacks()
 	local orderCount = 0
-	for _, unitID in ipairs(calibrationUnits) do
-		if GiveForwardGroundAttack(unitID) then
+	for index, unitID in ipairs(calibrationUnits) do
+		if GiveHostileTargetAttack(index, unitID) then
 			orderCount = orderCount + 1
 		end
 	end
 	Spring.Echo(string.format(
-		"[AOE Anchor Calibration] issued forward ground-attack orders to %d/%d units; distance=%.1f",
-		orderCount, #calibrationUnits, GROUND_ATTACK_DISTANCE))
+		"[AOE Anchor Calibration] issued forward hostile-target attack orders to %d/%d unit pairs; distance<=%.1f",
+		orderCount, #calibrationUnits, CALIBRATION_TARGET_DISTANCE))
+end
+
+local function GetForwardTargetPosition(unitID)
+	local unitX, _, unitZ = Spring.GetUnitPosition(unitID)
+	local frontX, _, frontZ = Spring.GetUnitDirection(unitID)
+	if unitX == nil or frontX == nil then
+		return nil
+	end
+
+	-- Do not clamp a point after it has been calculated: that would move a
+	-- boundary target off its unit's forward axis. Reduce its distance instead.
+	local distance = CALIBRATION_TARGET_DISTANCE
+	if frontX > 0 then
+		distance = math.min(distance, (Game.mapSizeX - CALIBRATION_TARGET_EDGE_MARGIN - unitX) / frontX)
+	elseif frontX < 0 then
+		distance = math.min(distance, (unitX - CALIBRATION_TARGET_EDGE_MARGIN) / -frontX)
+	end
+	if frontZ > 0 then
+		distance = math.min(distance, (Game.mapSizeZ - CALIBRATION_TARGET_EDGE_MARGIN - unitZ) / frontZ)
+	elseif frontZ < 0 then
+		distance = math.min(distance, (unitZ - CALIBRATION_TARGET_EDGE_MARGIN) / -frontZ)
+	end
+	distance = math.max(0, distance)
+	local targetX = unitX + frontX * distance
+	local targetZ = unitZ + frontZ * distance
+	return targetX, Spring.GetGroundHeight(targetX, targetZ), targetZ, distance
+end
+
+local function PositionHostileTarget(index, unitID)
+	local targetID = calibrationTargets[index]
+	local targetX, _, targetZ = GetForwardTargetPosition(unitID)
+	if not Spring.ValidUnitID(targetID) or targetX == nil then
+		return false
+	end
+	Spring.SetUnitPosition(targetID, targetX, targetZ)
+	return true
 end
 
 local function SetCalibrationGroundAttack(enabled)
 	calibrationGroundAttack = enabled
 	if calibrationGroundAttack then
-		GiveCalibrationGroundAttacks()
+		-- The calibration scene normally holds fire so the units stay static.
+		-- Restore Fire At Will before asking native CommandAI to attack the
+		-- hostile target, otherwise the target command can remain queued without
+		-- ever reaching CWeapon.
+		for _, unitID in ipairs(calibrationUnits) do
+			if Spring.ValidUnitID(unitID) then
+				Spring.GiveOrderToUnit(unitID, CMD.FIRE_STATE, { 2 }, {})
+			end
+		end
+		GiveCalibrationHostileTargetAttacks()
 	else
 		local orderCount = 0
 		for _, unitID in ipairs(calibrationUnits) do
 			if Spring.ValidUnitID(unitID) and Spring.GiveOrderToUnit(unitID, CMD.STOP, {}, {}) then
 				orderCount = orderCount + 1
 			end
+			if Spring.ValidUnitID(unitID) then
+				Spring.GiveOrderToUnit(unitID, CMD.FIRE_STATE, { 0 }, {})
+			end
 		end
 		Spring.Echo(string.format(
-			"[AOE Anchor Calibration] stopped forward ground attack for %d/%d units",
+			"[AOE Anchor Calibration] stopped hostile-target attack for %d/%d units",
 			orderCount, #calibrationUnits))
 	end
 	SendToUnsynced("aoe_anchor_calibration_ground_attack_state", calibrationGroundAttack)
@@ -618,8 +667,9 @@ local function SetCalibrationHeading(index, radians)
 	local directionX = math.sin(heading)
 	local directionZ = math.cos(heading)
 	Spring.SetUnitDirection(unitID, directionX, 0, directionZ, -directionZ, 0, directionX)
+	PositionHostileTarget(index, unitID)
 	if calibrationGroundAttack then
-		GiveForwardGroundAttack(unitID)
+		GiveHostileTargetAttack(index, unitID)
 	end
 	SendSnapshot(index, unitID)
 end
@@ -649,6 +699,18 @@ local function SpawnCalibrationScene()
 		Spring.SetUnitDirection(unitID, frontX, 0, frontZ, -frontZ, 0, frontX)
 		Spring.GiveOrderToUnit(unitID, CMD.FIRE_STATE, { 0 }, {})
 		calibrationUnits[index] = unitID
+		local targetX, targetY, targetZ = GetForwardTargetPosition(unitID)
+		local targetID = Spring.CreateUnit(
+			CALIBRATION_TARGET_UNIT_NAME, targetX, targetY, targetZ, "south", CALIBRATION_TARGET_TEAM)
+		if targetID == nil then
+			error("[AOE Anchor Calibration] failed to create hostile target for unit " .. index)
+		end
+		-- Targets are durable passive markers; they must not retaliate or vanish
+		-- while an operator compares the same direction repeatedly.
+		Spring.SetUnitMaxHealth(targetID, CALIBRATION_TARGET_HEALTH)
+		Spring.SetUnitHealth(targetID, { health = CALIBRATION_TARGET_HEALTH })
+		Spring.GiveOrderToUnit(targetID, CMD.FIRE_STATE, { 0 }, {})
+		calibrationTargets[index] = targetID
 	end
 	Spring.SetGlobalLos(0, true)
 	if runtimeMuzzleOverride ~= nil then
@@ -657,8 +719,9 @@ local function SpawnCalibrationScene()
 		PublishRuntimeMuzzleOverrideState()
 	end
 	Spring.Echo(string.format(
-		"[AOE Anchor Calibration] created %d %s units; spacing=%.1f forwardGroundAttack=%s",
-		CALIBRATION_DIRECTION_COUNT, CALIBRATION_UNIT_NAME, calibrationSpacing, tostring(calibrationGroundAttack)))
+		"[AOE Anchor Calibration] created %d %s/%s forward unit-target pairs; spacing=%.1f hostileTargetAttack=%s",
+		CALIBRATION_DIRECTION_COUNT, CALIBRATION_UNIT_NAME, CALIBRATION_TARGET_UNIT_NAME,
+		calibrationSpacing, tostring(calibrationGroundAttack)))
 end
 
 function gadget:GameStart()
@@ -667,7 +730,7 @@ end
 
 function gadget:GameFrame(frame)
 	if calibrationGroundAttack and frame == GROUND_ATTACK_START_FRAME then
-		GiveCalibrationGroundAttacks()
+		GiveCalibrationHostileTargetAttacks()
 	end
 	if frame == 15 or frame % SNAPSHOT_PERIOD == 0 then
 		SendSnapshots()

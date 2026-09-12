@@ -9,8 +9,8 @@ function gadget:GetInfo()
 	}
 end
 
-local UNIT_NAME = "aoe_camel_scout"
-local WEAPON_NAME = "aoe_camel_scout_melee"
+local UNIT_NAME = "aoe_light_cavalry"
+local WEAPON_NAME = "aoe_light_cavalry_melee"
 local DIRECTION_COUNT = 16
 local COLUMN_COUNT = 4
 local SNAPSHOT_PERIOD = 5
@@ -395,6 +395,10 @@ local lastReleaseDelta = {}
 local singleAttackers = {}
 local battleTeams = { {}, {} }
 local collisionOffsets = {}
+-- Frames from attack start to the native hit, read back from the WeaponDef in
+-- GameStart so the calibration report follows the def rather than a duplicated
+-- literal.
+local expectedReleaseFrames = 0
 
 local function SetDirection(unitID, frontX, frontZ)
 	Spring.SetUnitDirection(unitID, frontX, 0, frontZ, -frontZ, 0, frontX)
@@ -640,6 +644,7 @@ local function SendSnapshots()
 end
 
 function gadget:GameStart()
+	expectedReleaseFrames = math.floor(WeaponDefs[WeaponDefNames[WEAPON_NAME].id].windup * 30 + 0.5)
 	if calibrationEnabled then
 		SpawnCalibration()
 	else
@@ -676,8 +681,8 @@ function gadget:UnitDamaged(unitID, unitDefID, unitTeam, damage, paralyzer, weap
 	local startFrame = moveData.attackMotionStartFrame or -1
 	lastReleaseDelta[unitID] = startFrame >= 0 and frame - startFrame or -1
 	local pair = targetLookup[unitID]
-	Spring.Echo(string.format("[AOE Melee Calibration] damage direction=%d frame=%d attacker=%d target=%d amount=%.1f start=%d delta=%d expected=10",
-		pair.index, frame, attackerID, unitID, damage, startFrame, lastReleaseDelta[unitID]))
+	Spring.Echo(string.format("[AOE Melee Calibration] damage direction=%d frame=%d attacker=%d target=%d amount=%.1f start=%d delta=%d expected=%d",
+		pair.index, frame, attackerID, unitID, damage, startFrame, lastReleaseDelta[unitID], expectedReleaseFrames))
 	if singleAttackers[attackerID] then
 		singleAttackers[attackerID] = nil
 		StopUnit(attackerID)

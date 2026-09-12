@@ -10,8 +10,8 @@
 	RecordDemo=0;
 	FixedRNGSeed=1;
 	NumPlayers=1;
-	NumTeams=1;
-	NumAllyTeams=1;
+	NumTeams=2;
+	NumAllyTeams=2;
 
 	[MAPOPTIONS]
 	{
@@ -47,7 +47,19 @@
 		RGBColor=0.20 0.65 1.00;
 	}
 
+	[TEAM1]
+	{
+		TeamLeader=0;
+		AllyTeam=1;
+		RGBColor=1.00 0.25 0.25;
+	}
+
 	[ALLYTEAM0]
+	{
+		NumAllies=0;
+	}
+
+	[ALLYTEAM1]
 	{
 		NumAllies=0;
 	}

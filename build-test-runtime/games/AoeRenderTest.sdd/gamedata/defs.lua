@@ -114,7 +114,7 @@ return {
 				-- DAT weapon_offset=(0, 0.5, 1.5), using the validated
 				-- archer conversion and vertical calibration.
 				aoe2_aim_local = "0 30 0",
-				aoe2_weapon1_muzzle_local = "0 55.5 30",
+				aoe2_weapon1_muzzle_local = "4 55.5 30",
 				aoe2_weapon1_forward_local = "0 0 1",
 			},
 			weapons = {
@@ -746,7 +746,11 @@ return {
 		aoe_light_cavalry_melee = {
 			name = "AOE light cavalry melee", weaponType = "Melee", areaOfEffect = 0, canAttackGround = false,
 			impulseFactor = 0, impulseBoost = 0, range = 32, reloadtime = 2,
-			windup = 0.3333333333, attackRecoveryTime = 0.6666666667, targetBorder = 1, cylinderTargeting = 1, turret = false, tolerance = 1820,
+			-- DAT frame_delay=10 lands the hit too early in the swing, so the
+			-- native hit is moved to frame 18 of the 30-frame AttackA. Recovery
+			-- is shortened to keep windup + attackRecoveryTime equal to the
+			-- whole animation.
+			windup = 0.6, attackRecoveryTime = 0.4, targetBorder = 1, cylinderTargeting = 1, turret = false, tolerance = 1820,
 			damage = { default = 7 }, aoeDamage = { monk = 10, melee = 7 }, aoeUpgradeTags = { "cavalry" },
 		},
 		aoe_knight_melee = {

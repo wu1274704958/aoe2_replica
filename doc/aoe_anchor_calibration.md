@@ -55,6 +55,7 @@ Start-Process .\build-official-release\extract\spring-dev.exe -ArgumentList @(
 | `Shift` + `Left` / `Right` | 十倍步长 |
 | `R` | 恢复 Def 默认预览 |
 | `E` | 导出 Lua override，复制到系统剪贴板 |
+| `G` | 切换对 16 个红方高生命值靶子的原生 `CMD.ATTACK`；每个靶子在对应蓝方单位正前方、武器射程内，且不会反击 |
 
 `heading` 调整会通过同步 Gadget 修改当前测试 Unit 的真实方向。当引擎以
 `AOE_DEV_TOOL=1` 构建时，`muzzle` 调整会通过测试专用 API 实时应用到 16 个 Unit 的
