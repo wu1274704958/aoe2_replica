@@ -61,6 +61,9 @@ struct Aoe2UnitInstanceDesc {
 	std::uint8_t playerColor = 1;
 	std::uint32_t tintRgba8 = 0xFFFFFFFFu;
 	bool visible = true;
+	// Keep overlapping billboard sprites in a stable foot-depth order. Projectile
+	// instances disable this because their continuous flight depth is meaningful.
+	bool stableDepthOrdering = true;
 };
 
 struct Aoe2UnitRenderDiagnostics {

@@ -312,6 +312,7 @@ bool Aoe2ProjectileGameplayBridgeImpl::AddProjectile(const CProjectile* projecti
 	desc.animationTime = 0.0f;
 	desc.playbackSpeed = 0.0f;
 	desc.visible = false;
+	desc.stableDepthOrdering = false;
 	const Aoe2InstanceHandle instance = CAoe2UnitRenderer::CreateInstance(desc);
 	if (!instance)
 		return false;

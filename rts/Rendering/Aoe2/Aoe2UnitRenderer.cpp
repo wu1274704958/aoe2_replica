@@ -53,6 +53,11 @@ CONFIG(float, Aoe2UnitBelowFootDepthSafety)
 	.minimumValue(0.0f)
 	.maximumValue(0.25f)
 	.description("Extra relative depth separation for the AOE2 sprite region below its foot point");
+CONFIG(float, Aoe2UnitDepthBucketSize)
+	.defaultValue(4.0f)
+	.minimumValue(0.0f)
+	.maximumValue(32.0f)
+	.description("Camera-depth bucket size in elmos for stable AOE2 unit sprite overlap; zero disables it");
 CONFIG(int, Aoe2UnitTestCount)
 	.defaultValue(0)
 	.minimumValue(0)
@@ -70,6 +75,7 @@ namespace {
 constexpr float PI = 3.14159265358979323846f;
 constexpr float TWO_PI = PI * 2.0f;
 constexpr std::uint32_t INVALID_INDEX = ~std::uint32_t(0);
+constexpr std::uint32_t DEPTH_ORDER_KEY_MASK = 0x0FFFFFFFu;
 
 struct Float4 {
 	float x = 0.0f;
@@ -163,6 +169,7 @@ struct Instance {
 	Aoe2UnitAnimationSlot animation = Aoe2UnitAnimationSlot::IdleA;
 	std::uint8_t playerColor = 1;
 	std::uint32_t tintRgba8 = 0xFFFFFFFFu;
+	std::uint32_t depthOrderKey = 0;
 };
 
 constexpr std::string_view VERTEX_SHADER = R"GLSL(
@@ -171,6 +178,7 @@ uniform mat4 uViewProj;
 uniform vec3 uCameraDir;
 uniform float uBelowFootCameraBiasScale;
 uniform float uBelowFootDepthSafety;
+uniform float uDepthBucketSize;
 layout(location = 0) in vec3 vposition;
 layout(location = 1) in vec4 vaxisX;
 layout(location = 2) in vec4 vaxisY;
@@ -184,6 +192,14 @@ flat out uint oPlayer;
 vec4 unpackRgba8(uint value) {
 	return vec4(float(value & 255u), float((value >> 8u) & 255u),
 		float((value >> 16u) & 255u), float((value >> 24u) & 255u)) / 255.0;
+}
+uint hashDepthOrderKey(uint value) {
+	value ^= value >> 16u;
+	value *= 0x7feb352du;
+	value ^= value >> 15u;
+	value *= 0x846ca68bu;
+	value ^= value >> 16u;
+	return value;
 }
 void main() {
 	float sourceRow = vgeometry.w;
@@ -207,6 +223,21 @@ void main() {
 		max(-uCameraDir.y, 0.05) * uBelowFootCameraBiasScale * (1.0 + uBelowFootDepthSafety);
 	vec3 worldPosition = vorigin.xyz + vaxisX.xyz * local.x + vaxisY.xyz * local.y;
 	worldPosition -= uCameraDir * (belowFootT * bottomDepthOffset);
+
+	// Billboard depth is defined by its foot point. Quantize it so sub-elmo
+	// interpolation and simulation movement cannot reverse overlapping sprites
+	// every render frame. Anchor the result at the near edge of the current
+	// bucket and place its stable tie value farther toward the camera. This
+	// keeps adjacent buckets strictly ordered without ever pushing the sprite
+	// behind its real foot point and into the terrain.
+	uint depthOrderKey = vmaterial.y >> 4u;
+	if (uDepthBucketSize > 0.0 && depthOrderKey != 0u) {
+		float footDepth = dot(vorigin.xyz, uCameraDir);
+		float bucketNearDepth = floor(footDepth / uDepthBucketSize) * uDepthBucketSize;
+		float tie01 = (float(hashDepthOrderKey(depthOrderKey) & 65535u) + 0.5) / 65536.0;
+		float stableFootDepth = bucketNearDepth - tie01 * (uDepthBucketSize * 0.5);
+		worldPosition += uCameraDir * (stableFootDepth - footDepth);
+	}
 	gl_Position = uViewProj * vec4(worldPosition, 1.0);
 	vec2 p0 = vuv.xy;
 	vec2 p1 = vuv.xy + vuv.zw;
@@ -524,6 +555,7 @@ public:
 	float pixelsToWorld = 1.0f;
 	float belowFootCameraBiasScale = 1.0f;
 	float belowFootDepthSafety = 0.02f;
+	float depthBucketSize = 4.0f;
 	std::vector<std::unique_ptr<Appearance>> appearances;
 	std::vector<Instance> instances;
 	std::vector<std::uint32_t> freeInstances;
@@ -582,6 +614,7 @@ bool Aoe2RendererImpl::Init()
 	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
 	belowFootCameraBiasScale = configHandler->GetFloat("Aoe2UnitBelowFootCameraBiasScale");
 	belowFootDepthSafety = configHandler->GetFloat("Aoe2UnitBelowFootDepthSafety");
+	depthBucketSize = configHandler->GetFloat("Aoe2UnitDepthBucketSize");
 	diagnosticsEnabled = configHandler->GetBool("Aoe2UnitDiagnostics");
 	if (!std::filesystem::exists(cacheRoot)) {
 		LOG_L(L_WARNING, "[Aoe2UnitRenderer] cache root does not exist: %s", cacheRoot.string().c_str());
@@ -619,8 +652,9 @@ bool Aoe2RendererImpl::Init()
 	}
 
 	CreateTestGrid();
-	LOG_L(L_INFO, "[Aoe2UnitRenderer] initialized (cache=%s, testInstances=%u, belowFootCameraBiasScale=%.2f, belowFootDepthSafety=%.3f)",
-		cacheRoot.string().c_str(), static_cast<unsigned>(testHandles.size()), belowFootCameraBiasScale, belowFootDepthSafety);
+	LOG_L(L_INFO, "[Aoe2UnitRenderer] initialized (cache=%s, testInstances=%u, belowFootCameraBiasScale=%.2f, belowFootDepthSafety=%.3f, depthBucketSize=%.2f)",
+		cacheRoot.string().c_str(), static_cast<unsigned>(testHandles.size()), belowFootCameraBiasScale, belowFootDepthSafety,
+		depthBucketSize);
 	return true;
 }
 
@@ -976,6 +1010,7 @@ Aoe2InstanceHandle Aoe2RendererImpl::Create(const Aoe2UnitInstanceDesc& desc)
 	instance.playbackSpeed = desc.playbackSpeed;
 	instance.playerColor = std::clamp<std::uint8_t>(desc.playerColor, 1, 8);
 	instance.tintRgba8 = desc.tintRgba8;
+	instance.depthOrderKey = desc.stableDepthOrdering ? (index % DEPTH_ORDER_KEY_MASK) + 1u : 0u;
 	return {index, generation};
 }
 
@@ -1090,11 +1125,13 @@ void Aoe2RendererImpl::RebuildBatches()
 			{instance.position.x, instance.position.y, instance.position.z, 1.0f},
 		};
 		const auto makeVisual = [&](const Frame& frame) {
+			const std::uint32_t materialFlags = static_cast<std::uint32_t>(instance.playerColor) |
+				((instance.depthOrderKey & DEPTH_ORDER_KEY_MASK) << 4u);
 			return VisualInstance{
 				frame.uv,
 				{frame.width, frame.height, frame.footX, frame.footY},
 				instance.tintRgba8,
-				static_cast<std::uint32_t>(instance.playerColor),
+				materialFlags,
 			};
 		};
 		animation.mainBatch.world.push_back(mainWorld);
@@ -1114,6 +1151,7 @@ void Aoe2RendererImpl::Update()
 	pixelsToWorld = configHandler->GetFloat("Aoe2UnitPixelsToWorld");
 	belowFootCameraBiasScale = configHandler->GetFloat("Aoe2UnitBelowFootCameraBiasScale");
 	belowFootDepthSafety = configHandler->GetFloat("Aoe2UnitBelowFootDepthSafety");
+	depthBucketSize = configHandler->GetFloat("Aoe2UnitDepthBucketSize");
 	const float deltaSeconds = std::clamp(globalRendering->lastFrameTime * 0.001f, 0.0f, 0.1f);
 	testElapsed += deltaSeconds;
 	if (!testHandles.empty() && !testCameraConfigured && camHandler != nullptr &&
@@ -1162,6 +1200,7 @@ void Aoe2RendererImpl::Update()
 					desc.playbackSpeed = instance->playbackSpeed;
 					desc.playerColor = instance->playerColor;
 					desc.tintRgba8 = instance->tintRgba8;
+					desc.stableDepthOrdering = (instance->depthOrderKey != 0u);
 					destroyedTestInstances.push_back(desc);
 					Destroy(testHandles[i]);
 				}
@@ -1301,8 +1340,12 @@ void Aoe2RendererImpl::DrawBatch(const Animation& animation, GpuBatch& batch, bo
 	shader->SetUniformMatrix4x4("uViewProj", false, camera->GetViewProjectionMatrix().m);
 	const float3 cameraDir = camera->GetDir();
 	shader->SetUniform("uCameraDir", cameraDir.x, cameraDir.y, cameraDir.z);
-	shader->SetUniform("uBelowFootCameraBiasScale", shadow ? 0.0f : belowFootCameraBiasScale);
-	shader->SetUniform("uBelowFootDepthSafety", shadow ? 0.0f : belowFootDepthSafety);
+	// Shadow frames have their own foot anchors and may contain pixels below
+	// them. Reuse the main-sprite terrain clearance without applying stable
+	// depth buckets to the non-depth-writing shadow pass.
+	shader->SetUniform("uBelowFootCameraBiasScale", belowFootCameraBiasScale);
+	shader->SetUniform("uBelowFootDepthSafety", belowFootDepthSafety);
+	shader->SetUniform("uDepthBucketSize", shadow ? 0.0f : depthBucketSize);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, shadow ? animation.shadow.texture : animation.main.texture);
 	if (!shadow) {
