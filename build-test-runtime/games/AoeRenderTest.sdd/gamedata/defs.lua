@@ -642,14 +642,14 @@ return {
 			impulseFactor = 0,
 			impulseBoost = 0,
 			-- DAT max_range=4.0 under the shared 60 world-units-per-AOE-range profile.
-			range = 240,
+			range = 300,
 			reloadtime = 2,
 			windup = 0.5,
 			attackRecoveryTime = 0.5,
 			accuracy = 0,
 			sprayAngle = 0,
 			targetMoveError = 0,
-			weaponVelocity = 400,
+			weaponVelocity = 200,
 			gravityAffected = true,
 			-- Require the unit chassis (and therefore the directional sprite) to
 			-- face the target before firing. 1820 legacy angle units is about 10°.
@@ -668,6 +668,8 @@ return {
 				aoe2_projectile_id = "p_arrow",
 				aoe2_projectile_scale = "1.0",
 			},
+			leadLimit = 0,
+			leadBonus = 0,
 		},
 		aoe_chukonu_arrow = {
 			name = "AOE Chu Ko Nu arrow volley",
@@ -689,7 +691,7 @@ return {
 			accuracy = 0,
 			sprayAngle = 0,
 			targetMoveError = 0,
-			weaponVelocity = 400,
+			weaponVelocity = 120,
 			gravityAffected = true,
 			turret = false,
 			tolerance = 1820,
@@ -697,6 +699,8 @@ return {
 			collideFriendly = false,
 			avoidFeature = false,
 			collideFeature = false,
+			leadLimit = 0,
+			leadBonus = 0,
 			-- The first bolt is the unit attack and receives normal archer
 			-- upgrades. Secondary projectile DAT 510 bolts are fixed 3 pierce.
 			damage = { default = 8 },
@@ -728,10 +732,12 @@ return {
 			name = "AOE crossbow bolt", weaponType = "Cannon", areaOfEffect = 8, impactOnly = true,
 			impulseFactor = 0, impulseBoost = 0, range = 300, reloadtime = 2,
 			windup = 0.5, attackRecoveryTime = 0.5, accuracy = 0, sprayAngle = 0, targetMoveError = 0,
-			weaponVelocity = 400, gravityAffected = true, highTrajectory = 0, turret = false, tolerance = 1820,
+			weaponVelocity = 250, gravityAffected = true, highTrajectory = 0, turret = false, tolerance = 1820,
 			avoidFriendly = false, collideFriendly = false, avoidFeature = false, collideFeature = false,
 			damage = { default = 5 }, aoeDamage = { spearman = 3, pierce = 5 }, aoeUpgradeTags = { "archer" },
 			customParams = { aoe2_projectile_id = "p_arrow", aoe2_projectile_scale = "1.0", aoe2_projectile_source_unit_id = "364" },
+			leadLimit = 0,
+			leadBonus = 0,
 		},
 		aoe_samurai_melee = {
 			name = "AOE samurai melee", weaponType = "Melee", areaOfEffect = 0, canAttackGround = false,

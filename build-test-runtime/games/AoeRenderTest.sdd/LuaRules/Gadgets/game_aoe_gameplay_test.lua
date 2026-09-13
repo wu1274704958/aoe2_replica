@@ -9,6 +9,8 @@ function gadget:GetInfo()
 	}
 end
 
+local ARMOR_RESET_MESSAGE = "aoe_gameplay_test:reset_armor"
+
 if not gadgetHandler:IsSyncedCode() then
 	local modOptions = Spring.GetModOptions()
 	local fixedCameraValue = tostring(modOptions.aoe_fixed_test_camera or "false"):lower()
@@ -16,6 +18,8 @@ if not gadgetHandler:IsSyncedCode() then
 	local meleeCalibrationValue = tostring(modOptions.aoe_melee_calibration or "false"):lower()
 	local meleeBattleValue = tostring(modOptions.aoe_melee_battle or "false"):lower()
 	local meleeTestEnabled = meleeCalibrationValue == "1" or meleeCalibrationValue == "true" or meleeBattleValue == "1" or meleeBattleValue == "true"
+	local armorResetValue = tostring(modOptions.aoe_armor_upgrade_test or "false"):lower()
+	local armorResetEnabled = armorResetValue == "1" or armorResetValue == "true" or armorResetValue == "yes" or armorResetValue == "on"
 	local fixedTestCamera = VFS.Include("LuaRules/aoe_fixed_test_camera.lua")
 
 	function gadget:Initialize()
@@ -37,6 +41,20 @@ if not gadgetHandler:IsSyncedCode() then
 		elseif eventName == "aoe_anchor_line" then
 			local x1, y1, z1, x2, y2, z2 = ...
 			Spring.MarkerAddLine(x1, y1, z1, x2, y2, z2, true)
+		end
+	end
+
+	function gadget:KeyPress(key, mods, isRepeat)
+		if armorResetEnabled and not isRepeat and key == 114 then
+			Spring.SendLuaRulesMsg(ARMOR_RESET_MESSAGE)
+			return true
+		end
+		return false
+	end
+
+	function gadget:DrawScreen(viewSizeX, viewSizeY)
+		if armorResetEnabled then
+			gl.Text("[R] Reset AOE armor battle", 20, viewSizeY - 28, 13, "o")
 		end
 	end
 	return
@@ -80,6 +98,10 @@ local castleRapidFireUpgradeTestEnabled = ReadBooleanOption("aoe_castle_rapid_fi
 local statusLogPeriod = 150
 local eliminationCheckPeriod = 15
 local stalledDistanceThreshold = 128
+local activeAttackMoveFrame = attackMoveStartFrame
+local combatRound = 0
+local combatFeatureIDs = {}
+local combatProjectileIDs = {}
 local attackStartAudit = { checked = {}, samples = 0, violations = 0 }
 local expectedFightTargets = {}
 local destroyedUnitFrames = {}
@@ -254,7 +276,7 @@ local function SpawnFormation(team)
 		local row = math.floor((index - 1) / dimensions.columns)
 		local x = team.center.x - dimensions.width * 0.5 + column * formationSpacing
 		local z = team.center.z - dimensions.depth * 0.5 + row * formationSpacing
-		local unitName = camelSlots[index] and "aoe_camel_scout" or "aoe_archer"
+		local unitName = camelSlots[index] and "aoe_knight" or "aoe_crossbowman"
 		local unitID = Spring.CreateUnit(unitName, x, Spring.GetGroundHeight(x, z), z, team.facing, team.teamID)
 		if unitID then
 			team.units[#team.units + 1] = unitID
@@ -290,6 +312,7 @@ local function SpawnTeamTower(team)
 	if towerID == nil then
 		error(string.format("[AOE Gameplay Test] failed to create Team %s tower", team.name))
 	end
+	team.towerID = towerID
 
 	Spring.Echo(string.format(
 		"[AOE Gameplay Test] Team %s tower=%d rearPosition=(%.1f, %.1f)",
@@ -588,7 +611,7 @@ local function InitializePositionDiagnostic()
 end
 
 local function UpdatePositionDiagnostic(frame)
-	if not positionDiagnosticEnabled or frame < attackMoveStartFrame then
+	if not positionDiagnosticEnabled or frame < activeAttackMoveFrame then
 		return
 	end
 
@@ -963,6 +986,94 @@ local function SpawnAnchorValidation()
 	end
 end
 
+local function ResetCombatDiagnostics()
+	attackStartAudit = { checked = {}, samples = 0, violations = 0 }
+	expectedFightTargets = {}
+	destroyedUnitFrames = {}
+	moveDiagnostic = {
+		totalFailures = 0,
+		failuresByUnit = {},
+		eliminationFrame = nil,
+		survivorTeamID = nil,
+		survivorName = nil,
+		eliminatedName = nil,
+		snapshotOffsets = { 0, 30, 150, 300, 600, 900 },
+		snapshotsLogged = {},
+		targetDeathCases = 0,
+		targetDeathFightPreserved = 0,
+	}
+	positionDiagnostic = {
+		units = {},
+		states = {},
+		triggerCount = 0,
+		maxTriggerCount = 16,
+		protectedTriggerCount = 0,
+		maxProtectedTriggerCount = 16,
+		historyFrames = 8,
+		followFrames = 12,
+		cooldownFrames = 60,
+		collisionLockedFrames = 0,
+		collisionLockedDisplacements = 0,
+		maxCollisionLockedDisplacement = 0,
+	}
+	explicitMoveRegression = {
+		cases = {},
+		completed = 0,
+		passed = 0,
+		deadlineFrame = activeAttackMoveFrame + 1200,
+	}
+end
+
+local function StartCombatRound(frame, isReset)
+	combatRound = combatRound + 1
+	activeAttackMoveFrame = frame + attackMoveStartFrame
+
+	for _, team in ipairs(teams) do
+		team.units = {}
+		team.towerID = nil
+	end
+
+	ResetCombatDiagnostics()
+	SpawnFormation(teams[1])
+	SpawnFormation(teams[2])
+	SpawnTeamTower(teams[1])
+	SpawnTeamTower(teams[2])
+	InitializePositionDiagnostic()
+	InitializeExplicitMoveRegression()
+
+	Spring.Echo(string.format(
+		"[AOE Gameplay Test] round=%d %s; attackMoveFrame=%d",
+		combatRound, isReset and "reset" or "initialized", activeAttackMoveFrame
+	))
+end
+
+local function ResetArmorCombatRound()
+	if not armorUpgradeTestEnabled then
+		return
+	end
+
+	for projectileID in pairs(combatProjectileIDs) do
+		Spring.DeleteProjectile(projectileID)
+	end
+	for featureID in pairs(combatFeatureIDs) do
+		Spring.DestroyFeature(featureID)
+	end
+	combatProjectileIDs = {}
+	combatFeatureIDs = {}
+	for _, team in ipairs(teams) do
+		for _, unitID in ipairs(team.units) do
+			if Spring.ValidUnitID(unitID) then
+				Spring.DestroyUnit(unitID, false, true, nil, true)
+			end
+		end
+		if team.towerID and Spring.ValidUnitID(team.towerID) then
+			Spring.DestroyUnit(team.towerID, false, true, nil, true)
+		end
+	end
+
+	StartCombatRound(Spring.GetGameFrame(), true)
+end
+
 function gadget:GameStart()
 	if buildingTest or meleeCalibration or meleeBattle or chukonuTest then
 		return
@@ -1001,16 +1112,11 @@ function gadget:GameStart()
 		tostring(Spring.GetGlobalLos(0))
 	))
 
-	SpawnFormation(teams[1])
-	SpawnFormation(teams[2])
-	SpawnTeamTower(teams[1])
-	SpawnTeamTower(teams[2])
-	InitializePositionDiagnostic()
-	InitializeExplicitMoveRegression()
+	StartCombatRound(Spring.GetGameFrame(), false)
 	Spring.Echo(string.format("[AOE Gameplay Test] Team A/B allied=%s", tostring(Spring.AreTeamsAllied(teams[1].teamID, teams[2].teamID))))
 	Spring.Echo(string.format(
 		"[AOE Gameplay Test] spacing=%.1f separation=%.1f attackMoveFrame=%d counterAttack=%s globalLos=%s",
-		formationSpacing, formationSeparation, attackMoveStartFrame, tostring(counterAttack), tostring(globalLosForTeamA)
+		formationSpacing, formationSeparation, activeAttackMoveFrame, tostring(counterAttack), tostring(globalLosForTeamA)
 	))
 end
 
@@ -1051,14 +1157,14 @@ function gadget:GameFrame(frame)
 
 	AuditAttackStartSpeed(frame)
 
-	if frame == attackMoveStartFrame then
+	if frame == activeAttackMoveFrame then
 		GiveAttackMove(teams[1], teams[2].center)
 		if counterAttack then
 			GiveAttackMove(teams[2], teams[1].center)
 		end
 	end
 
-	if frame >= attackMoveStartFrame then
+	if frame >= activeAttackMoveFrame then
 		UpdatePositionDiagnostic(frame)
 		UpdateExplicitMoveRegression(frame)
 		UpdateEliminationDiagnostic(frame)
@@ -1083,17 +1189,43 @@ function gadget:GameFrame(frame)
 	end
 end
 
+function gadget:RecvLuaMsg(message, playerID)
+	if message ~= ARMOR_RESET_MESSAGE or not armorUpgradeTestEnabled then
+		return false
+	end
+
+	ResetArmorCombatRound()
+	return true
+end
+
 function gadget:UnitDestroyed(unitID)
 	destroyedUnitFrames[unitID] = Spring.GetGameFrame()
 end
 
+function gadget:FeatureCreated(featureID)
+	if armorUpgradeTestEnabled then
+		combatFeatureIDs[featureID] = true
+	end
+end
+
+function gadget:FeatureDestroyed(featureID)
+	combatFeatureIDs[featureID] = nil
+end
+
 function gadget:ProjectileCreated(projectileID, ownerID, weaponDefID)
+	if armorUpgradeTestEnabled then
+		combatProjectileIDs[projectileID] = true
+	end
 	if not anchorValidation or weaponDefID ~= WeaponDefNames.aoe_arrow.id then
 		return
 	end
 	local x, y, z = Spring.GetProjectilePosition(projectileID)
 	Spring.Echo(string.format("[AOE Anchor Test] projectile=%d owner=%d start=(%.2f,%.2f,%.2f)", projectileID, ownerID, x or 0, y or 0, z or 0))
 	SendAnchorPoint(x, y, z, "projectile start")
+end
+
+function gadget:ProjectileDestroyed(projectileID)
+	combatProjectileIDs[projectileID] = nil
 end
 
 function gadget:UnitDamaged(unitID, unitDefID, unitTeam, damage, paralyzer, weaponDefID, projectileID)

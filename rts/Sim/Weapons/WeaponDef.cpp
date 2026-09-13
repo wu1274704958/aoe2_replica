@@ -95,6 +95,7 @@ WEAPONTAG(std::string, type).externalName("weaponType").defaultValue("Cannon")
 	"Rifle - deprecated, more or less equivalent to invisible Lightning\n"
 );
 WEAPONDUMMYTAG(table, customParams).description("A table of arbitrary string key-value pairs, for use by Lua gadgets (no engine meaning)");
+WEAPONDUMMYTAG(table, aoeSalvoDamage).description("Optional per-salvo damage profiles for AOE armor gameplay. Each entry either inherits the firing weapon's mutable damage or supplies damage and aoeDamage tables.");
 
 // Collision & Avoidance
 WEAPONTAG(bool, avoidFriendly).defaultValue(true).description("Does the weapon avoid shooting if there's allies in the way? Note that an ally can run into the projectile and it will still explode - use `collideFriendly` to avoid that");

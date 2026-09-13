@@ -1192,19 +1192,8 @@ bool CWeapon::TestTarget(const float3& tgtPos, const SWeaponTarget& trg) const
 bool CWeapon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const float heightDiff = tgtPos.y - aimFromPos.y;
 	const float targetDist = aimFromPos.SqDistance2D(tgtPos);
-
-	float weaponRange = 0.0f; // range modified by heightDiff and cylinderTargeting
-
-	if (trg.type == Target_Pos || weaponDef->cylinderTargeting < 0.01f) {
-		// check range in a sphere (with extra radius <heightDiff * heightMod>)
-		weaponRange = GetRange2D(0.0f, heightDiff * weaponDef->heightmod);
-	} else {
-		// check range in a cylinder (with height <cylinderTargeting * range>)
-		if ((weaponDef->cylinderTargeting * range) > (math::fabsf(heightDiff) * weaponDef->heightmod))
-			weaponRange = GetRange2D(0.0f, 0.0f);
-	}
+	const float weaponRange = GetTargetRange2D(tgtPos, trg);
 
 	if (targetDist > (weaponRange * weaponRange))
 		return false;
@@ -1227,6 +1216,26 @@ bool CWeapon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
 
 	// NOTE: mainDir is in unit-space
 	return (CheckTargetAngleConstraint(targetAngleDir, owner->GetObjectSpaceVec(mainDir)));
+}
+
+
+float CWeapon::GetTargetRange2D(const float3& tgtPos, const SWeaponTarget& trg) const
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	const float heightDiff = tgtPos.y - aimFromPos.y;
+
+	float weaponRange = 0.0f; // range modified by heightDiff and cylinderTargeting
+
+	if (trg.type == Target_Pos || weaponDef->cylinderTargeting < 0.01f) {
+		// check range in a sphere (with extra radius <heightDiff * heightMod>)
+		weaponRange = GetRange2D(0.0f, heightDiff * weaponDef->heightmod);
+	} else {
+		// check range in a cylinder (with height <cylinderTargeting * range>)
+		if ((weaponDef->cylinderTargeting * range) > (math::fabsf(heightDiff) * weaponDef->heightmod))
+			weaponRange = GetRange2D(0.0f, 0.0f);
+	}
+
+	return weaponRange;
 }
 
 

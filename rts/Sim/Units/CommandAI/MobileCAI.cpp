@@ -746,6 +746,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	const float targetGoalDist = targetErrPos.SqDistance2D(owner->moveType->goalPos);
 	const float targetPosDist = Square(10.0f + orderTarget->pos.distance2D(owner->pos) * 0.2f);
 	const float minPointingDist = std::min(1.0f * owner->losRadius, owner->maxRange * 0.9f);
+	float closeInRange = owner->maxRange * 0.9f;
 
 	// FIXME? targetMidPosMaxDist is 3D, but compared with a 2D value
 	const float targetMidPosDist2D = targetMidPosVec.Length2D();
@@ -782,6 +783,23 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 		tryOwnerRotation |= w->WantOwnerRotation();
 	}
 
+	// A low-speed Cannon can have a much smaller physical range than its
+	// configured range. Strict stationary AOE units must continue closing in
+	// that interval rather than stopping at the nominal range and waiting for
+	// an impossible firing solution. Keep this scoped away from ordinary units.
+	if (
+		!tryTargetRotate &&
+		owner->unitDef->attackCannotMove &&
+		owner->weapons.size() == 1 &&
+		owner->weapons.front()->weaponDef->type == "Cannon"
+	) {
+		const CWeapon* primaryWeapon = owner->weapons.front();
+		const float3 targetPos = primaryWeapon->GetUnitLeadTargetPos(orderTarget);
+		const float physicalRange = primaryWeapon->GetTargetRange2D(targetPos, orderTgtInfo);
+
+		closeInRange = std::min(closeInRange, physicalRange * 0.9f);
+	}
+
 	// if w->AttackUnit() returned true then we are already
 	// in range with our biggest (?) weapon, so stop moving
 	// also make sure that we're not locked in close-in/in-range state
@@ -814,7 +832,7 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	}
 
 	// target is probably close enough
-	if (targetMidPosDist2D < (owner->maxRange * 0.9f)) {
+	if (targetMidPosDist2D < closeInRange) {
 		if (owner->unitDef->IsHoveringAirUnit() || (targetMidPosVec.SqLength2D() < 1024) || tryOwnerRotation) {
 			StopMove();
 			owner->moveType->KeepPointingTo(targetFacingPos, minPointingDist, true);
