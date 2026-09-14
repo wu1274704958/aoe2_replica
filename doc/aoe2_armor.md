@@ -31,10 +31,23 @@ When an `aoeDamage` weapon hits a unit, the engine calculates:
 max(1, sum(max(0, attack[class] - targetArmor[class])))
 ```
 
-Missing target armor is zero. The resulting base damage then continues through
+An attack class only participates when the target explicitly declares the same
+armor class. A missing target class contributes no damage; it is not implicit
+zero armor. This matches AOE2's sparse attack/armor-class semantics and avoids
+applying bonuses to unrelated targets. The resulting base damage then continues through
 the existing Recoil flank modifier, armored multiplier, `UnitPreDamaged`,
 impulse, and health paths. Normal weapons, environmental damage, collisions,
 and Features retain their existing damage behavior.
+
+`Defs.lua` must use the canonical readable class names defined by
+[aoe2_manifest_to_recoil_rules.md](aoe2_manifest_to_recoil_rules.md). Numeric
+DAT identifiers such as `class_4` and `class_20` are allowed only in manifests,
+debug output and conversion reports. An unknown numeric class blocks Def
+generation until the authoritative mapping table is reviewed and updated.
+
+Do not publish a readable name and its numeric equivalent together. The engine
+matches normalized strings rather than resolving aliases, so duplicate forms
+would be summed as separate classes.
 
 Projectile weapons retain their `DamageArray` at launch, so an upgrade applied
 after firing affects subsequent projectiles but not arrows already in flight.

@@ -1,5 +1,8 @@
 # AOE Camel Scout 近战校准与 Gameplay 测试
 
+> 本文是近战校准场景说明，不定义独立的数据转换规则。正式转换以
+> [aoe2_manifest_to_recoil_rules.md](aoe2_manifest_to_recoil_rules.md) 为唯一规范。
+
 ## 接入边界
 
 `aoe_camel_scout` 使用 Recoil 原生 `weaponType="Melee"`。CommandAI 负责索敌、

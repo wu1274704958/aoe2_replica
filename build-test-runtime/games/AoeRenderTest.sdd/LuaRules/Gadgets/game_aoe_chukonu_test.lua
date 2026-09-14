@@ -53,10 +53,9 @@ if not gadgetHandler:IsSyncedCode() then
 	return
 end
 
--- Mirrors CalculateAoeArmorDamage() in Sim/Misc/DamageArray.cpp: every attack
--- class the weapon declares contributes max(0, attack[class] - armor[class]),
--- classes absent from the target's armor table count as zero armor, and the
--- total floors at one.
+-- Mirrors CalculateAoeArmorDamage() in Sim/Misc/DamageArray.cpp: only classes
+-- declared by both the attack and target contribute. Missing target classes
+-- are ignored, and the total floors at one.
 -- Mirrors AddAoeArmorEntries() in the same file: a technology appends its
 -- deltas, and normalization sums entries that name the same class.
 local function MergeAttack(baseAttack, delta)
@@ -73,8 +72,10 @@ end
 local function ComputeAoeDamage(attackEntries, armorEntries)
 	local total = 0
 	for className, attackValue in pairs(attackEntries or {}) do
-		local armorValue = (armorEntries and armorEntries[className]) or 0
-		total = total + math.max(0, attackValue - armorValue)
+		local armorValue = armorEntries and armorEntries[className]
+		if armorValue ~= nil then
+			total = total + math.max(0, attackValue - armorValue)
+		end
 	end
 	return math.max(1, total)
 end
@@ -200,8 +201,8 @@ function gadget:GameStart()
 
 	Spring.Echo(string.format(
 		"[AOE Chu Ko Nu Test] setup weapon=%s burst=%d burstRate=%.3f windup=%.3f reloadTime=%.3f range=%.1f target=%s expectedMain=%.2f expectedFollowUp=%.2f",
-		WEAPON_NAME, WeaponDefs[test.weaponDefID].burst, WeaponDefs[test.weaponDefID].burstRate,
-		WeaponDefs[test.weaponDefID].windup, WeaponDefs[test.weaponDefID].reloadTime,
+		WEAPON_NAME, WeaponDefs[test.weaponDefID].salvoSize, WeaponDefs[test.weaponDefID].salvoDelay,
+		WeaponDefs[test.weaponDefID].windup, WeaponDefs[test.weaponDefID].reload,
 		WeaponDefs[test.weaponDefID].range, TARGET_NAME, test.expectedMain, test.expectedFollowUp
 	))
 end

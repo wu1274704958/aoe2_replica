@@ -131,6 +131,7 @@ WEAPONTAG(float, weaponacceleration).fallbackName("acceleration").defaultValue(0
 WEAPONTAG(float, reload).externalName("reloadTime").defaultValue(1.0f).description("Reload time between bursts, in seconds. Note that reloadTime starts to count down from the first round fired, not the last, so if (reloadTime < burst * burstRate) the weapon will fire continuously.");
 WEAPONDUMMYTAG(float, salvoWindup).externalName("windup").description("Delay between firing and the first shot");
 WEAPONDUMMYTAG(float, attackRecoveryTime).description("Movement-lock recovery time after the final shot, in seconds");
+WEAPONTAG(bool, revalidateTargetOnSalvo).defaultValue(false).description("Recheck target validity, range and line of fire immediately before each salvo projectile is released.");
 WEAPONTAG(float, salvodelay).externalName("burstRate").defaultValue(0.1f).description("Delay between shots within a burst, in seconds");
 WEAPONTAG(int, salvosize).externalName("burst").defaultValue(1).description("Shots per burst. Cannot be used by #BeamLaser unless `beamburst` is used which comes with caveats.");
 WEAPONTAG(int, projectilespershot).externalName("projectiles").defaultValue(1).description("Projectiles per shot. Best used in conjunction with `sprayAngle` or changing the firing piece in script using ShotX as otherwise they'll all be clumped up in one blob.");
@@ -157,6 +158,7 @@ WEAPONTAG(bool, fireSubmersed).fallbackName("waterweapon").defaultValue(false).d
 // Targeting
 WEAPONTAG(bool, manualfire).externalName("commandfire").defaultValue(false).description("Does the weapon respond to the manual fire command instead of regular attack?");
 WEAPONTAG(float, range).defaultValue(10.0f).description("Maximum targeting range. Ballistic weapons can resolve lower due to physics. Some weapons can also fly past that range if they miss.");
+WEAPONTAG(float, minRange).defaultValue(0.0f).minimumValue(0.0f).description("Minimum horizontal targeting range. Zero preserves the original no-minimum-range behavior.");
 WEAPONTAG(float, heightmod).defaultValue(0.2f).description("Multiplies height difference to target, for targeting purposes. When lower than 1, the targeting volume becomes elongated vertically and the unit can target further high than normal (useful to make terrain and aircraft less punishing). At 0, the height difference component becomes completely ignored.");
 WEAPONTAG(float, targetBorder).defaultValue(0.0f).minimumValue(-1.0f).maximumValue(1.0f).description("1/-1 will target the close/far edge of the colvol (instead of center). Matters for huge colvols and/or small ranges");
 WEAPONTAG(float, cylinderTargeting).fallbackName("cylinderTargetting").defaultValue(0.0f).minimumValue(0.0f).maximumValue(128.0f).description("Makes targeting happen in a cylinder. The height is range times this value. Zero means use the usual range (spherical or ballistic)");

@@ -46,6 +46,7 @@ public:
 
 	void ClearTargetLock(const Command& fc);
 	void WeaponFired(CWeapon* weapon, const bool searchForNewTarget, bool raiseEvent = true);
+	void WeaponTargetInvalidated(const CWeapon* weapon);
 
 	virtual bool CanWeaponAutoTarget(const CWeapon* weapon) const { return true; }
 	virtual int GetDefaultCmd(const CUnit* pointed, const CFeature* feature);

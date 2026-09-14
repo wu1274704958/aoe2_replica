@@ -764,6 +764,34 @@ void CMobileCAI::ExecuteObjectAttack(Command& c)
 	orderTgtInfo.isUserTarget = (!c.IsInternalOrder());
 	orderTgtInfo.isManualFire = (c.GetID() == CMD_MANUALFIRE);
 
+	// A minimum-range weapon needs command-level handling in addition to the
+	// fire gate. Temporary Fight targets are skipped so the original route can
+	// continue; an explicit attack backs away unless the unit is holding.
+	if (owner->weapons.size() == 1 && owner->weapons.front()->weaponDef->minRange > 0.0f) {
+		CWeapon* weapon = owner->weapons.front();
+		const float3 targetAimPos = weapon->GetUnitLeadTargetPos(orderTarget);
+		if (weapon->IsTargetTooClose(targetAimPos)) {
+			if (tempOrder) {
+				StopMoveAndFinishCommand();
+				return;
+			}
+
+			if (owner->moveState == MOVESTATE_HOLDPOS || owner->unitDef->IsImmobileUnit()) {
+				StopMove();
+				owner->moveType->KeepPointingTo(targetFacingPos, minPointingDist, true);
+				return;
+			}
+
+			float3 retreatDir = (owner->pos - orderTarget->pos).SafeNormalize2D();
+			if (retreatDir.SqLength2D() == 0.0f)
+				retreatDir = -owner->frontdir;
+			const float distance = owner->pos.distance2D(targetAimPos);
+			const float retreatDistance = weapon->weaponDef->minRange - distance + 2.0f * SQUARE_SIZE;
+			SetGoal(owner->pos + retreatDir * retreatDistance, owner->pos);
+			return;
+		}
+	}
+
 	const short targetHeading = GetHeadingFromVector(-targetFacingVec.x, -targetFacingVec.z);
 
 	assert(c.GetID() != CMD_MANUALFIRE || (!owner->weapons.empty() && owner->unitDef->canManualFire));
@@ -886,6 +914,23 @@ void CMobileCAI::ExecuteGroundAttack(Command& c)
 	const float3 attackVec = attackPos - owner->pos;
 	const short  attackHeading = GetHeadingFromVector(attackVec.x, attackVec.z);
 	const SWeaponTarget attackTgtInfo(attackPos, !c.IsInternalOrder());
+	if (owner->weapons.size() == 1 && owner->weapons.front()->weaponDef->minRange > 0.0f) {
+		CWeapon* weapon = owner->weapons.front();
+		if (weapon->IsTargetTooClose(attackPos)) {
+			if (owner->moveState == MOVESTATE_HOLDPOS || owner->unitDef->IsImmobileUnit()) {
+				StopMoveAndKeepPointing(attackPos, owner->maxRange * 0.9f, true);
+				return;
+			}
+
+			float3 retreatDir = (owner->pos - attackPos).SafeNormalize2D();
+			if (retreatDir.SqLength2D() == 0.0f)
+				retreatDir = -owner->frontdir;
+			const float distance = owner->pos.distance2D(attackPos);
+			const float retreatDistance = weapon->weaponDef->minRange - distance + 2.0f * SQUARE_SIZE;
+			SetGoal(owner->pos + retreatDir * retreatDistance, owner->pos);
+			return;
+		}
+	}
 
 	if (c.GetID() == CMD_MANUALFIRE) {
 		assert(owner->unitDef->canManualFire);

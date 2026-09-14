@@ -11,30 +11,32 @@
 - 验收场景 `build-test-runtime/aoe-chukonu-test.txt` + `game_aoe_chukonu_test.lua`，实测通过：
 
   ```text
-  PASS volley=base             hits=[1:10.00 2:3.00 3:3.00] expected=[10.00,3.00,3.00]
-  PASS volley=after-fletching  hits=[1:11.00 2:3.00 3:3.00] expected=[11.00,3.00,3.00]
+  PASS volley=base             hits=[1:8.00 2:3.00 3:3.00] expected=[8.00,3.00,3.00]
+  PASS volley=after-fletching  hits=[1:9.00 2:3.00 3:3.00] expected=[9.00,3.00,3.00]
   ```
 
-  首箭吃 `fletching`（+1 穿刺）升到 11，后两箭稳定 3 不变，与 DAT 的"后续箭不继承主箭升级"一致。测试目标用 `Spring.SetUnitFlanking` 把 Recoil 的 flanking 伤害系数固定在 1.0，以隔离与该机制无关的 0.9 下限。
+  首箭吃 `fletching`（+1 穿刺）升到 9，后两箭稳定 3 不变，与 DAT 的"后续箭不继承主箭升级"一致。测试目标用 `Spring.SetUnitFlanking` 把 Recoil 的 flanking 伤害系数固定在 1.0，以隔离与该机制无关的 0.9 下限。
 - 遗留：`burstRate` 目前是 6/30 的占位值，后两箭的精确释放帧仍需从 AttackA 逐帧标定，manifest 未记录该数据。
 
-## AOE 攻击类别与护甲的匹配（影响整个 roster）
+## 已实现：AOE 攻击类别与护甲的稀疏匹配
 
-- 现状：`CalculateAoeArmorDamage()` 按 `max(1, sum(max(0, attack[class] - armor[class])))` 计算，且 `doc/aoe2_armor.md` 明确"缺失目标护甲按 0"。因此武器 `aoeDamage` 里的**任何**加成类别都会对**所有**目标生效，而非只对拥有该护甲类别的目标生效。
-- 症状：`aoe_chukonu_arrow` 的 `aoeDamage = { spearman = 2, pierce = 8 }` 打无护甲弓兵结算为 10 而不是 8；`aoe_handcannoneer` 的 `{ spearman = 1, infantry = 10, pierce = 17, ram = 2, gunpowder = -10 }` 会结算为 30 而不是 17。受影响的是全部带加成类别的 AOE 武器，不是诸葛连弩特有。
-- 待定方案：要么让导出的 `aoeArmor` 为全部加成类别补条目（非本类目标给一个足够大的值），要么把"缺失护甲类别"的语义改为"该类别不参与结算"。两者都会改变现有 AOE 单位的结算数值，需要连同 `doc/aoe2_armor.md` 和现有测试一起评估。
+- 实现：`CalculateAoeArmorDamage()` 现在只计算攻击和目标护甲表中同时存在的类别；目标缺失类别不再隐式视为零护甲。最低总伤害仍为 1。
+- Def 策略：保留已有可读类别，并为 DAT 精确映射补充 `class_N` 数字键。Bombard 等新武器只使用数字键，避免未知或复用类别被错误命名。武器不能同时配置同一类别的别名和数字键，否则两者会作为不同类别相加。
+- 影响：诸葛连弩的 `spearman` 加成不再作用于未声明 `spearman` 护甲的普通弓兵；火枪兵的 Infantry/Ram 等加成也仅命中显式类别。
+- 回归脚本的首箭期望值已随稀疏类别语义从旧错误的 10/11 更新为 8/9；新引擎实测基础轮次 `8/3/3`、Fletching 后 `9/3/3`，两轮均 PASS。
 
-## 最小射程武器
+## 已实现：最小射程与释放时弹道复查
 
 受影响资源：非洲箭塔（DAT 79）、西方城堡（DAT 82）、手推炮（DAT 36）、小型抛石机（DAT 280）、未展开投石机（DAT 42）。
 
 - 源数据的 min range 分别为 1、1、5、3、4 个 AoE 射程单位。
-- 缺口：当前 `WeaponDef` 没有最小目标距离，CommandAI、自动索敌和 Weapon 的可开火判断不会拒绝近距离目标。
-- 后续 C++ 方案：在 `WeaponDef` 新增可选 `minRange`，并在武器目标有效性、自动目标选择和攻击地面判定中统一按水平距离拒绝低于阈值的目标。默认 0，确保非 AOE 单位的行为不变。
-- 验收：目标位于 `[minRange, maxRange]` 时可以开火；低于 minRange 时不锁定、不发射、且不影响普通 Recoil WeaponDef。
+- `WeaponDef.minRange` 默认 0，在自动索敌、`CWeapon::TryTarget/TestRange`、移动单位对象/地面攻击 CommandAI 中统一执行水平距离检查。
+- `CMD.FIGHT` 的临时目标过近时会被跳过并继续原路线；显式 `CMD.ATTACK` 会后退到可攻击距离；Hold Position 不后退。
+- `WeaponDef.revalidateTargetOnSalvo` 默认关闭。启用后在每发 Projectile 释放前，以最新目标位置重新验证有效性、范围、射界和弹道；首发失败会取消本轮并退还 reload，burst 后续失败只截断未发射部分。
+- `aoe_bombard_cannon_shot` 首次使用上述两个开关。非最小射程、未开启释放复查的武器保持原路径。
 
 ## 攻城器额外语义
 
 - 小型抛石机需要核对 AoE 范围伤害、友伤、辅助投射物和 Recoil `areaOfEffect` 的精确差异。
 - 未展开投石机仅有静态资源；严格接入需要 Pack/Unpack 状态、移动限制及相应动画/资源状态机。
-- 在以上缺口完成前，不为这三个攻城器生成可被测试脚本实例化的 Def。
+- 手推炮已经生成可测试 Def；小型抛石机和未展开投石机仍等待各自的辅助投射物/展开状态语义后再接入。

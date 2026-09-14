@@ -85,10 +85,13 @@ int CalculateAoeArmorDamage(const AoeArmorEntries& attack, const AoeArmorEntries
 		while (armorIndex < armor.size() && armor[armorIndex].name < attack[attackIndex].name)
 			++armorIndex;
 
-		const int armorValue = (armorIndex < armor.size() && armor[armorIndex].name == attack[attackIndex].name)? armor[armorIndex].value: 0;
-		totalDamage += std::max(0, attack[attackIndex].value - armorValue);
-		if (totalDamage >= std::numeric_limits<int>::max())
-			return std::numeric_limits<int>::max();
+		// AOE attack classes are opt-in on the target. A bonus class absent
+		// from the target's armor table does not participate in damage.
+		if (armorIndex < armor.size() && armor[armorIndex].name == attack[attackIndex].name) {
+			totalDamage += std::max(0, attack[attackIndex].value - armor[armorIndex].value);
+			if (totalDamage >= std::numeric_limits<int>::max())
+				return std::numeric_limits<int>::max();
+		}
 
 		++attackIndex;
 	}

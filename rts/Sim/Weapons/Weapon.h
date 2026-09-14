@@ -60,6 +60,7 @@ public:
 	virtual bool TestTarget(const float3& pos, const SWeaponTarget& trg) const;
 	/// test if the enemy/mapspot is in range/angle
 	virtual bool TestRange(const float3& tgtPos, const SWeaponTarget& trg) const;
+	bool IsTargetTooClose(const float3& tgtPos) const;
 	/// return the maximum horizontal target distance currently reachable by this weapon
 	float GetTargetRange2D(const float3& tgtPos, const SWeaponTarget& trg) const;
 	/// test if something is blocking our LineOfFire

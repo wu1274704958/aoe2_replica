@@ -23,12 +23,19 @@ enum class Aoe2UnitAnimationSlot : std::uint8_t {
 
 constexpr std::size_t AOE2_ANIMATION_SLOT_COUNT = static_cast<std::size_t>(Aoe2UnitAnimationSlot::Count);
 
+enum class Aoe2AnimationSamplingMode : std::uint8_t {
+	Timeline,
+	PitchPose,
+	TimeLoop,
+};
+
 struct Aoe2UnitAnimationInfo {
 	float durationSeconds = 0.0f;
 	float releaseTimeSeconds = 0.0f;
 	float fps = 0.0f;
 	std::uint32_t frameCount = 0;
 	bool loop = false;
+	Aoe2AnimationSamplingMode samplingMode = Aoe2AnimationSamplingMode::Timeline;
 };
 
 struct Aoe2AppearanceRenderBounds {

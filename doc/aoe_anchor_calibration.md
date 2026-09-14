@@ -1,6 +1,6 @@
 # AOE 远程单位锚点校准场景
 
-这是一个仅用于本地开发的 `u_arc_archer` 远程单位校准场景。它复用 Recoil 原生
+这是一个仅用于本地开发的 AOE 远程单位校准场景。它复用 Recoil 原生
 Unit、Weapon 和 CollisionVolume 数据，并将其以非同步调试叠加层显示；不包含战斗、
 寻路或批量渲染压测。
 
@@ -12,8 +12,12 @@ Unit、Weapon 和 CollisionVolume 数据，并将其以非同步调试叠加层�
 build-test-runtime/aoe-anchor-calibration-test.txt
 ```
 
-需要调整网格间距时，编辑该文件中的
-`aoe_anchor_calibration_spacing`；默认值为 260。
+可通过 `aoe_anchor_calibration_unit`、`aoe_anchor_calibration_target_unit`、
+`aoe_anchor_calibration_target_distance`、`aoe_anchor_calibration_spacing` 和
+`aoe_anchor_calibration_move_state` 选择
+受测单位、靶子、射击距离与网格间距。默认仍使用诸葛连弩、长矛兵、180 距离与
+260 间距，并保持 Hold Position。手推炮预设使用 Maneuver，以便显式目标进入
+`minRange` 时可以原生后退；入口见 `aoe-bombard-calibration-test.txt`。
 
 然后构建并运行：
 
@@ -25,7 +29,7 @@ Start-Process .\build-official-release\extract\spring-dev.exe -ArgumentList @(
 ) -WorkingDirectory $PWD
 ```
 
-场景会生成 16 名静止弓手，按 4×4 网格排列，分别覆盖 16 个 Sprite 朝向，并为测试
+场景会生成 16 个静止远程单位，按 4×4 网格排列，分别覆盖 16 个 Sprite 朝向，并为测试
 玩家开启全图 LOS。固定长焦相机由
 `LuaRules/aoe_fixed_test_camera.lua` 集中定义，并与开启
 `aoe_fixed_test_camera` 的双队 Gameplay 测试共用。
@@ -75,7 +79,7 @@ overlay，可即时作用于 AOE Sprite，不写入用户配置。
 按 `E` 时会：
 
 1. 将可直接编辑的 Lua override 复制到系统剪贴板；
-2. 新建文件 `LuaUI/Config/AOEAnchorCalibration/u_arc_archer_override_<frame>_<serial>.lua`。
+2. 新建文件 `LuaUI/Config/AOEAnchorCalibration/<unit>_override_<frame>_<serial>.lua`。
 
 导出文件不自动加载、不会覆盖 `defs.lua`、manifest、缓存资源或引擎配置。其文件名
 带帧号以避免覆盖既有导出；请审阅 diff 后再人工合并。

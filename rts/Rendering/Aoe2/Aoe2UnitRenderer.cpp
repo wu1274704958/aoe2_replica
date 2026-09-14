@@ -135,6 +135,7 @@ struct Animation {
 	float fps = 30.0f;
 	int directionCount = 0;
 	int framesPerDirection = 0;
+	Aoe2AnimationSamplingMode samplingMode = Aoe2AnimationSamplingMode::Timeline;
 	Layer main;
 	Layer shadow;
 	Layer playerColor;
@@ -544,7 +545,12 @@ public:
 	void SetupBatch(GpuBatch& batch);
 	void UploadBatch(GpuBatch& batch);
 	void DrawBatch(const Animation& animation, GpuBatch& batch, bool shadow);
-	Animation LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName, bool requirePlayerColor = true);
+	Animation LoadAnimation(
+		const std::filesystem::path& configPath,
+		const std::string& expectedName,
+		bool requirePlayerColor = true,
+		Aoe2AnimationSamplingMode defaultSamplingMode = Aoe2AnimationSamplingMode::Timeline
+	);
 	Shader::IProgramObject* CreateShader(const char* name, std::string_view fragmentShader);
 	int DirectionForHeading(float heading, int directionCount) const;
 	void PollGpuQueries();
@@ -679,7 +685,12 @@ void Aoe2RendererImpl::Kill()
 	shadowShader = nullptr;
 }
 
-Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPath, const std::string& expectedName, bool requirePlayerColor)
+Animation Aoe2RendererImpl::LoadAnimation(
+	const std::filesystem::path& configPath,
+	const std::string& expectedName,
+	bool requirePlayerColor,
+	Aoe2AnimationSamplingMode defaultSamplingMode
+)
 {
 	simdjson::dom::parser parser;
 	simdjson::dom::element document;
@@ -692,6 +703,18 @@ Animation Aoe2RendererImpl::LoadAnimation(const std::filesystem::path& configPat
 	animation.fps = static_cast<float>(document["fps"].get_double().value());
 	animation.directionCount = static_cast<int>(document["direction_count"].get_int64().value());
 	animation.framesPerDirection = static_cast<int>(document["frames_per_direction"].get_int64().value());
+	animation.samplingMode = defaultSamplingMode;
+	std::string_view samplingMode;
+	if (document["sampling_mode"].get_string().get(samplingMode) == simdjson::SUCCESS) {
+		if (samplingMode == "timeline")
+			animation.samplingMode = Aoe2AnimationSamplingMode::Timeline;
+		else if (samplingMode == "pitch_pose")
+			animation.samplingMode = Aoe2AnimationSamplingMode::PitchPose;
+		else if (samplingMode == "time_loop")
+			animation.samplingMode = Aoe2AnimationSamplingMode::TimeLoop;
+		else
+			throw std::runtime_error("unsupported animation sampling mode");
+	}
 	if (!(animation.fps > 0.0f) || animation.directionCount <= 0 || animation.framesPerDirection <= 0)
 		throw std::runtime_error("invalid animation dimensions");
 	if (GetString(document["frame_order"]) != "direction_major")
@@ -785,7 +808,8 @@ Aoe2AppearanceHandle Aoe2RendererImpl::Preload(const std::string& unitId)
 			if (GetString(entry["status"]) != "exported")
 				throw std::runtime_error(name + " is not exported");
 			const auto configPath = manifestPath.parent_path() / GetString(entry["config"]);
-			appearance->animations[i] = LoadAnimation(configPath, name);
+			appearance->animations[i] = LoadAnimation(
+				configPath, name, true, Aoe2AnimationSamplingMode::Timeline);
 			appearance->loaded[i] = true;
 			IncludeAnimationRenderBounds(*appearance, appearance->animations[i]);
 		}
@@ -839,7 +863,8 @@ bool Aoe2RendererImpl::EnsureAnimation(Appearance& appearance, Aoe2UnitAnimation
 		appearance.animations[index] = LoadAnimation(
 			appearance.configPaths[index],
 			appearance.animations[index].name,
-			appearance.requirePlayerColor[index]
+			appearance.requirePlayerColor[index],
+			Aoe2AnimationSamplingMode::Timeline
 		);
 		appearance.loaded[index] = true;
 		const auto& animation = appearance.animations[index];
@@ -957,7 +982,8 @@ Aoe2AppearanceHandle Aoe2RendererImpl::PreloadGraphics(const std::string& graphi
 		appearance = std::make_unique<Appearance>();
 		appearance->id = cacheId;
 		appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = LoadAnimation(
-			manifestPath.parent_path() / GetString(entry["config"]), animationName, false);
+			manifestPath.parent_path() / GetString(entry["config"]), animationName, false,
+			Aoe2AnimationSamplingMode::PitchPose);
 		appearance->loaded[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = true;
 		const auto& animation = appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)];
 		IncludeAnimationRenderBounds(*appearance, animation);
@@ -1556,6 +1582,7 @@ bool CAoe2UnitRenderer::GetAnimationInfo(
 	info.frameCount = static_cast<std::uint32_t>(animation.framesPerDirection);
 	info.durationSeconds = animation.framesPerDirection / animation.fps;
 	info.loop = AnimationLoops(animationSlot);
+	info.samplingMode = animation.samplingMode;
 	info.releaseTimeSeconds = (animationSlot == Aoe2UnitAnimationSlot::AttackA)
 		? std::clamp(appearancePtr->attackReleaseFrame / animation.fps, 0.0f, info.durationSeconds)
 		: 0.0f;

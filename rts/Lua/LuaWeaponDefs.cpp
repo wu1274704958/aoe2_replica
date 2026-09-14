@@ -510,6 +510,7 @@ static bool InitParamMap()
 	ADD_STRING("type", wd.type);
 
 	ADD_FLOAT("range", wd.range);
+	ADD_FLOAT("minRange", wd.minRange);
 	ADD_FLOAT("heightMod", wd.heightmod);
 	ADD_FLOAT("accuracy", wd.accuracy);
 	ADD_FLOAT("sprayAngle", wd.sprayAngle);
@@ -541,6 +542,7 @@ static bool InitParamMap()
 	ADD_FLOAT("salvoDelay", wd.salvodelay);
 	ADD_FUNCTION("windup", wd.salvoWindup, FramesToSeconds);
 	ADD_FUNCTION("attackRecoveryTime", wd.attackRecoveryTime, FramesToSeconds);
+	ADD_BOOL("revalidateTargetOnSalvo", wd.revalidateTargetOnSalvo);
 	ADD_FLOAT("reload",     wd.reload);
 	ADD_FLOAT("beamtime",   wd.beamtime);
 	ADD_BOOL("beamburst",   wd.beamburst);

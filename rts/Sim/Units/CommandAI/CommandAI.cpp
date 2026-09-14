@@ -1791,6 +1791,18 @@ void CCommandAI::WeaponFired(CWeapon* weapon, const bool searchForNewTarget, boo
 	FinishCommand();
 }
 
+void CCommandAI::WeaponTargetInvalidated(const CWeapon* weapon)
+{
+	if (weapon == nullptr || inCommand != CMD_ATTACK || commandQue.empty())
+		return;
+
+	// Internal object-attack commands are temporary targets inserted by Fight.
+	// Once the releasing weapon rejects one, remove only that temporary command
+	// so the underlying Fight route can continue and acquire another target.
+	if (commandQue.front().IsInternalOrder())
+		FinishCommand();
+}
+
 void CCommandAI::PushOrUpdateReturnFight(const float3& cmdPos1, const float3& cmdPos2)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -1861,4 +1873,3 @@ void CCommandAI::StopAttackingAllyTeam(int ally)
 	RECOIL_DETAILED_TRACY_ZONE;
 	StopAttackingTargetIf([&](const CUnit* t) { return (t != nullptr && t->allyteam == ally); });
 }
-

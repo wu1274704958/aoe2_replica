@@ -1,5 +1,8 @@
 # AOE2 Unit 锚点接入设计
 
+> 本文保留锚点方案的设计背景和样本验证记录。正式 manifest 到 Def 的转换必须遵循
+> [aoe2_manifest_to_recoil_rules.md](aoe2_manifest_to_recoil_rules.md)；如有冲突，以该权威规范为准。
+
 ## 目标与边界
 
 本设计让 AOE2 sprite Unit 在保留 Recoil 原生 Unit、Weapon、Cannon

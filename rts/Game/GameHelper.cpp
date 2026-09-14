@@ -727,6 +727,11 @@ size_t CGameHelper::GenerateWeaponTargets(const CWeapon* weapon, const CUnit* av
 
 				const float modRange = weapon->GetRange2D(rangeBoost, (targetPos.y - aimPosHeight) * heightMod);
 				const float sqDist2D = ownerPos.SqDistance2D(targetPos);
+				if (
+					weaponDef->minRange > 0.0f &&
+					weapon->IsTargetTooClose(weapon->GetUnitLeadTargetPos(targetUnit))
+				)
+					continue;
 
 				if (sqDist2D > Square(modRange))
 					continue;

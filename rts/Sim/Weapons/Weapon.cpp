@@ -624,6 +624,35 @@ void CWeapon::UpdateSalvo()
 	if (!salvoLeft || nextSalvo > gs->frameNum)
 		return;
 
+	if (weaponDef->revalidateTargetOnSalvo || weaponDef->minRange > 0.0f) {
+		UpdateWeaponPieces(false);
+		currentTargetPos = GetLeadTargetPos(currentTarget);
+		UpdateWeaponVectors();
+
+		if (!TryTarget(currentTargetPos, currentTarget, true)) {
+			const bool targetWasUserOrdered = currentTarget.isUserTarget;
+			const bool noProjectileReleased = (salvoLeft == salvoSize);
+			if (noProjectileReleased) {
+				// The reload was committed when windup began. A failed first
+				// release is not a shot and must restore both movement and reload.
+				owner->CancelAttackMotion(true);
+			} else {
+				// Earlier burst members remain committed; terminate only the
+				// unreleased tail and retain recovery from the last real shot.
+				salvoLeft = 0;
+				nextSalvo = gs->frameNum;
+				owner->script->EndBurst(weaponNum);
+				owner->FinishAttackMotion(this);
+				const bool searchForNewTarget = (currentTarget == owner->curTarget);
+				owner->commandAI->WeaponFired(this, searchForNewTarget, false);
+			}
+			avoidTarget = !targetWasUserOrdered;
+			if (!targetWasUserOrdered)
+				owner->commandAI->WeaponTargetInvalidated(this);
+			return;
+		}
+	}
+
 	salvoLeft--;
 	const int salvoIndex = salvoSize - salvoLeft - 1;
 	nextSalvo = gs->frameNum + salvoDelay;
@@ -1064,7 +1093,12 @@ bool CWeapon::TryTarget(const float3& tgtPos, const SWeaponTarget& trg, bool pre
 	if (!TestTarget(tgtPos, trg))
 		return false;
 
-	// auto-targeted units are allowed to be out of range
+	// Auto-targeted units can be pre-aimed outside maximum range, but a weapon
+	// with a dead zone must never acquire an opportunity target inside it.
+	if (IsTargetTooClose(tgtPos))
+		return false;
+
+	// auto-targeted units are allowed to be out of maximum range
 	// (UpdateFire will still block firing at such units)
 	if (!trg.isAutoTarget && !TestRange(tgtPos, trg))
 		return false;
@@ -1195,6 +1229,9 @@ bool CWeapon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
 	const float targetDist = aimFromPos.SqDistance2D(tgtPos);
 	const float weaponRange = GetTargetRange2D(tgtPos, trg);
 
+	if (IsTargetTooClose(tgtPos))
+		return false;
+
 	if (targetDist > (weaponRange * weaponRange))
 		return false;
 
@@ -1216,6 +1253,18 @@ bool CWeapon::TestRange(const float3& tgtPos, const SWeaponTarget& trg) const
 
 	// NOTE: mainDir is in unit-space
 	return (CheckTargetAngleConstraint(targetAngleDir, owner->GetObjectSpaceVec(mainDir)));
+}
+
+
+bool CWeapon::IsTargetTooClose(const float3& tgtPos) const
+{
+	if (weaponDef->minRange <= 0.0f)
+		return false;
+
+	// Minimum range is a chassis-to-target gameplay constraint. Measuring from
+	// a directional muzzle makes the result change while a turret=false owner
+	// turns to retreat, which can trap it oscillating across the threshold.
+	return owner->pos.SqDistance2D(tgtPos) < Square(weaponDef->minRange);
 }
 
 

@@ -48,6 +48,7 @@ struct WeaponDefMapping {
 	float scale = 1.0f;
 	float animationFps = 0.0f;
 	std::uint32_t elevationFrameCount = 0;
+	Aoe2AnimationSamplingMode samplingMode = Aoe2AnimationSamplingMode::PitchPose;
 	bool configured = false;
 	bool usable = false;
 };
@@ -199,6 +200,7 @@ void Aoe2ProjectileGameplayBridgeImpl::PrepareAppearances()
 		if (mapping.usable) {
 			mapping.animationFps = animationInfo.fps;
 			mapping.elevationFrameCount = animationInfo.frameCount;
+			mapping.samplingMode = animationInfo.samplingMode;
 			mapping.usable = mapping.animationFps > 0.0f && mapping.elevationFrameCount > 0;
 		}
 		if (!mapping.usable) {
@@ -310,7 +312,7 @@ bool Aoe2ProjectileGameplayBridgeImpl::AddProjectile(const CProjectile* projecti
 	desc.scale = mapping.scale;
 	desc.animation = Aoe2UnitAnimationSlot::IdleA;
 	desc.animationTime = 0.0f;
-	desc.playbackSpeed = 0.0f;
+	desc.playbackSpeed = (mapping.samplingMode == Aoe2AnimationSamplingMode::TimeLoop) ? 1.0f : 0.0f;
 	desc.visible = false;
 	desc.stableDepthOrdering = false;
 	const Aoe2InstanceHandle instance = CAoe2UnitRenderer::CreateInstance(desc);
@@ -372,12 +374,14 @@ void Aoe2ProjectileGameplayBridgeImpl::UpdateProjectile(std::uint32_t projectile
 	if (horizontalSpeedSq > MIN_HEADING_SPEED_SQ)
 		slot.heading = std::atan2(projectile->speed.x, projectile->speed.z);
 	CAoe2UnitRenderer::SetTransform(slot.instance, projectile->drawPos, slot.heading, mapping.scale);
-	CAoe2UnitRenderer::SetAnimation(
-		slot.instance,
-		Aoe2UnitAnimationSlot::IdleA,
-		PitchFrameTime(*projectile, mapping),
-		0.0f
-	);
+	if (mapping.samplingMode == Aoe2AnimationSamplingMode::PitchPose) {
+		CAoe2UnitRenderer::SetAnimation(
+			slot.instance,
+			Aoe2UnitAnimationSlot::IdleA,
+			PitchFrameTime(*projectile, mapping),
+			0.0f
+		);
+	}
 	CAoe2UnitRenderer::SetVisible(slot.instance, CProjectileDrawer::CanDrawProjectile(projectile, projectile->GetAllyteamID()));
 }
 

@@ -63,6 +63,7 @@ public:
 	GuiSoundSet hitSound;
 
 	float range;
+	float minRange;
 	float heightmod;
 	float accuracy;            ///< INaccuracy (!) of whole burst
 	float sprayAngle;          ///< INaccuracy of individual shots inside burst
@@ -97,6 +98,7 @@ public:
 	float salvodelay;
 	int salvoWindup;
 	int attackRecoveryTime = 0;
+	bool revalidateTargetOnSalvo = false;
 	float reload;
 	float beamtime;
 	bool beamburst;
