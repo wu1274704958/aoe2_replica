@@ -14,8 +14,13 @@
 #include <vector>
 
 #include "Aoe2UnitRenderer.h"
+#include "Game/GameHelper.h"
+#include "Game/GlobalUnsynced.h"
+#include "Rendering/GlobalRendering.h"
 #include "Rendering/Env/Particles/ProjectileDrawer.h"
 #include "Sim/Misc/GlobalConstants.h"
+#include "Sim/Misc/GlobalSynced.h"
+#include "Sim/Projectiles/ExplosionGenerator.h"
 #include "Sim/Projectiles/Projectile.h"
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Sim/Projectiles/WeaponProjectiles/WeaponProjectile.h"
@@ -35,6 +40,11 @@ CONFIG(bool, Aoe2ProjectileGameplayBridge)
 CONFIG(bool, Aoe2ProjectileGameplayDiagnostics)
 	.defaultValue(false)
 	.description("Log AOE2 projectile render-bridge metrics once per second");
+CONFIG(int, Aoe2ProjectileEffectMaxInstances)
+	.defaultValue(4096)
+	.minimumValue(0)
+	.maximumValue(65536)
+	.description("Maximum number of live AOE2 one-shot projectile impact effects");
 
 namespace {
 
@@ -51,6 +61,14 @@ struct WeaponDefMapping {
 	Aoe2AnimationSamplingMode samplingMode = Aoe2AnimationSamplingMode::PitchPose;
 	bool configured = false;
 	bool usable = false;
+	std::string impactEffectResourceId;
+	Aoe2AppearanceHandle impactEffectAppearance;
+	float impactEffectScale = 1.0f;
+	float impactEffectHeightOffset = 0.0f;
+	float impactEffectDuration = 0.0f;
+	float impactEffectAlpha = 1.0f;
+	bool impactEffectConfigured = false;
+	bool impactEffectUsable = false;
 };
 
 struct ProjectileSlot {
@@ -72,6 +90,24 @@ struct LifecycleEvent {
 	LifecycleEventType type;
 	std::uint32_t projectileId;
 	std::uintptr_t projectileToken;
+};
+
+struct ExplosionEvent {
+	float3 position;
+	float3 direction;
+	std::uint32_t mappingIndex = 0;
+	int gameFrame = 0;
+	bool visible = false;
+};
+
+struct EffectSlot {
+	Aoe2InstanceHandle instance;
+	std::uint32_t activeIndex = INVALID_ACTIVE_INDEX;
+	float elapsedSeconds = 0.0f;
+	float durationSeconds = 0.0f;
+	bool visible = false;
+
+	bool IsActive() const { return activeIndex != INVALID_ACTIVE_INDEX; }
 };
 
 const std::string* FindParam(const WeaponDef& weaponDef, std::string_view name)
@@ -111,10 +147,12 @@ public:
 
 	bool WantsEvent(const std::string& eventName) override
 	{
-		return eventName == "RenderProjectileCreated" || eventName == "RenderProjectileDestroyed";
+		return eventName == "RenderProjectileCreated" || eventName == "RenderProjectileDestroyed" ||
+			eventName == "Explosion";
 	}
 	void RenderProjectileCreated(const CProjectile* projectile) override { QueueEvent(LifecycleEventType::Created, projectile); }
 	void RenderProjectileDestroyed(const CProjectile* projectile) override { QueueEvent(LifecycleEventType::Destroyed, projectile); }
+	bool Explosion(int weaponDefID, const WeaponDef* weaponDef, const CExplosionParams& params) override;
 
 	Aoe2ProjectileGameplayBridgeDiagnostics diagnostics;
 
@@ -128,6 +166,10 @@ private:
 	bool AddProjectile(const CProjectile* projectile, std::uintptr_t token);
 	void RemoveProjectile(std::uint32_t projectileId, std::uintptr_t token = 0);
 	void UpdateProjectile(std::uint32_t projectileId, CProjectile* projectile);
+	void ProcessExplosionEvents();
+	bool AddEffect(const ExplosionEvent& event);
+	void RemoveEffect(std::uint32_t slotIndex);
+	void UpdateEffects(float deltaSeconds);
 	bool IsMappedProjectile(const CProjectile* projectile, std::uint32_t* mappingIndex = nullptr) const;
 	static float PitchFrameTime(const CProjectile& projectile, const WeaponDefMapping& mapping);
 
@@ -137,7 +179,14 @@ private:
 	std::mutex eventMutex;
 	std::vector<LifecycleEvent> queuedEvents;
 	std::vector<LifecycleEvent> processingEvents;
+	std::vector<ExplosionEvent> queuedExplosionEvents;
+	std::vector<ExplosionEvent> processingExplosionEvents;
+	std::vector<EffectSlot> effectSlots;
+	std::vector<std::uint32_t> freeEffectSlots;
+	std::vector<std::uint32_t> activeEffectSlots;
+	std::uint32_t maxEffects = 0;
 	std::atomic_bool enabled{false};
+	std::atomic_uint64_t droppedEffects{0};
 	bool appearancesPrepared = false;
 	bool registered = false;
 	std::chrono::steady_clock::time_point lastDiagnostics = std::chrono::steady_clock::now();
@@ -157,6 +206,15 @@ bool Aoe2ProjectileGameplayBridgeImpl::Init()
 	activeProjectileIds.reserve(MAX_PROJECTILES);
 	queuedEvents.reserve(MAX_PROJECTILES);
 	processingEvents.reserve(MAX_PROJECTILES);
+	maxEffects = static_cast<std::uint32_t>(configHandler->GetInt("Aoe2ProjectileEffectMaxInstances"));
+	effectSlots.resize(maxEffects);
+	freeEffectSlots.reserve(maxEffects);
+	activeEffectSlots.reserve(maxEffects);
+	queuedExplosionEvents.reserve(maxEffects);
+	processingExplosionEvents.reserve(maxEffects);
+	CAoe2UnitRenderer::ReserveAdditionalInstances(maxEffects);
+	for (std::uint32_t index = maxEffects; index > 0; --index)
+		freeEffectSlots.push_back(index - 1);
 	ParseMappings();
 	eventHandler.AddClient(this);
 	registered = true;
@@ -171,15 +229,25 @@ void Aoe2ProjectileGameplayBridgeImpl::ParseMappings()
 	for (const WeaponDef& weaponDef : weaponDefHandler->GetWeaponDefsVec()) {
 		if (weaponDef.id < 0 || static_cast<std::size_t>(weaponDef.id) >= mappings.size())
 			continue;
-		const std::string* resourceId = FindParam(weaponDef, "aoe2_projectile_id");
-		if (resourceId == nullptr || resourceId->empty())
-			continue;
-
 		auto& mapping = mappings[weaponDef.id];
-		mapping.resourceId = *resourceId;
-		mapping.scale = ParseFloatParam(weaponDef, "aoe2_projectile_scale", 1.0f, 0.01f, 16.0f);
-		mapping.configured = true;
-		++diagnostics.mappedWeaponDefs;
+		const std::string* resourceId = FindParam(weaponDef, "aoe2_projectile_id");
+		if (resourceId != nullptr && !resourceId->empty()) {
+			mapping.resourceId = *resourceId;
+			mapping.scale = ParseFloatParam(weaponDef, "aoe2_projectile_scale", 1.0f, 0.01f, 16.0f);
+			mapping.configured = true;
+			++diagnostics.mappedWeaponDefs;
+		}
+
+		const std::string* effectResourceId = FindParam(weaponDef, "aoe2_projectile_impact_effect_id");
+		if (effectResourceId != nullptr && !effectResourceId->empty()) {
+			mapping.impactEffectResourceId = *effectResourceId;
+			mapping.impactEffectScale = ParseFloatParam(
+				weaponDef, "aoe2_projectile_impact_effect_scale", 1.0f, 0.01f, 16.0f);
+			mapping.impactEffectHeightOffset = ParseFloatParam(
+				weaponDef, "aoe2_projectile_impact_effect_height_offset", 0.0f, -1024.0f, 1024.0f);
+			mapping.impactEffectConfigured = true;
+			++diagnostics.mappedEffectWeaponDefs;
+		}
 	}
 }
 
@@ -190,22 +258,39 @@ void Aoe2ProjectileGameplayBridgeImpl::PrepareAppearances()
 	appearancesPrepared = true;
 	for (std::size_t weaponDefId = 0; weaponDefId < mappings.size(); ++weaponDefId) {
 		auto& mapping = mappings[weaponDefId];
-		if (!mapping.configured)
-			continue;
-		mapping.appearance = CAoe2UnitRenderer::PreloadGraphicsAppearance(mapping.resourceId);
-		mapping.usable = static_cast<bool>(mapping.appearance);
-		Aoe2UnitAnimationInfo animationInfo;
-		mapping.usable = mapping.usable && CAoe2UnitRenderer::GetAnimationInfo(
-			mapping.appearance, Aoe2UnitAnimationSlot::IdleA, animationInfo);
-		if (mapping.usable) {
-			mapping.animationFps = animationInfo.fps;
-			mapping.elevationFrameCount = animationInfo.frameCount;
-			mapping.samplingMode = animationInfo.samplingMode;
-			mapping.usable = mapping.animationFps > 0.0f && mapping.elevationFrameCount > 0;
+		if (mapping.configured) {
+			mapping.appearance = CAoe2UnitRenderer::PreloadGraphicsAppearance(mapping.resourceId);
+			mapping.usable = static_cast<bool>(mapping.appearance);
+			Aoe2UnitAnimationInfo animationInfo;
+			mapping.usable = mapping.usable && CAoe2UnitRenderer::GetAnimationInfo(
+				mapping.appearance, Aoe2UnitAnimationSlot::IdleA, animationInfo);
+			if (mapping.usable) {
+				mapping.animationFps = animationInfo.fps;
+				mapping.elevationFrameCount = animationInfo.frameCount;
+				mapping.samplingMode = animationInfo.samplingMode;
+				mapping.usable = mapping.animationFps > 0.0f && mapping.elevationFrameCount > 0;
+			}
+			if (!mapping.usable) {
+				LOG_L(L_WARNING, "[Aoe2ProjectileBridge] AOE2 resource %s for WeaponDef %u is unavailable; keeping native projectile rendering",
+					mapping.resourceId.c_str(), static_cast<unsigned>(weaponDefId));
+			}
 		}
-		if (!mapping.usable) {
-			LOG_L(L_WARNING, "[Aoe2ProjectileBridge] AOE2 resource %s for WeaponDef %u is unavailable; keeping native projectile rendering",
-				mapping.resourceId.c_str(), static_cast<unsigned>(weaponDefId));
+
+		if (mapping.impactEffectConfigured) {
+			mapping.impactEffectAppearance = CAoe2UnitRenderer::PreloadEffectAppearance(mapping.impactEffectResourceId);
+			Aoe2EffectAppearanceInfo effectInfo;
+			mapping.impactEffectUsable = static_cast<bool>(mapping.impactEffectAppearance) &&
+				CAoe2UnitRenderer::GetEffectAppearanceInfo(mapping.impactEffectAppearance, effectInfo);
+			if (mapping.impactEffectUsable) {
+				mapping.impactEffectScale *= effectInfo.scale;
+				mapping.impactEffectDuration = effectInfo.durationSeconds;
+				mapping.impactEffectAlpha = effectInfo.alpha;
+				mapping.impactEffectUsable = mapping.impactEffectDuration > 0.0f;
+			}
+			if (!mapping.impactEffectUsable) {
+				LOG_L(L_ERROR, "[Aoe2ProjectileBridge] AOE2 impact effect %s for WeaponDef %u is unavailable; no AOE impact visual will be shown",
+					mapping.impactEffectResourceId.c_str(), static_cast<unsigned>(weaponDefId));
+			}
 		}
 	}
 }
@@ -236,8 +321,8 @@ void Aoe2ProjectileGameplayBridgeImpl::Enable()
 		if (projectile != nullptr)
 			AddProjectile(projectile, reinterpret_cast<std::uintptr_t>(projectile));
 	}
-	LOG_L(L_INFO, "[Aoe2ProjectileBridge] enabled (mappedWeaponDefs=%u, liveInstances=%u)",
-		diagnostics.mappedWeaponDefs, diagnostics.liveInstances);
+	LOG_L(L_INFO, "[Aoe2ProjectileBridge] enabled (mappedWeaponDefs=%u, mappedEffectDefs=%u, maxEffects=%u, liveInstances=%u)",
+		diagnostics.mappedWeaponDefs, diagnostics.mappedEffectWeaponDefs, maxEffects, diagnostics.liveInstances);
 }
 
 void Aoe2ProjectileGameplayBridgeImpl::Disable()
@@ -247,12 +332,17 @@ void Aoe2ProjectileGameplayBridgeImpl::Disable()
 	{
 		std::scoped_lock lock(eventMutex);
 		queuedEvents.clear();
+		queuedExplosionEvents.clear();
 	}
 	while (!activeProjectileIds.empty())
 		RemoveProjectile(activeProjectileIds.back());
+	while (!activeEffectSlots.empty())
+		RemoveEffect(activeEffectSlots.back());
 	diagnostics.liveInstances = 0;
 	diagnostics.visibleInstances = 0;
-	LOG_L(L_INFO, "[Aoe2ProjectileBridge] disabled; native projectile rendering restored");
+	diagnostics.liveEffects = 0;
+	diagnostics.visibleEffects = 0;
+	LOG_L(L_INFO, "[Aoe2ProjectileBridge] disabled; native projectile rendering restored and AOE effects cleared");
 }
 
 void Aoe2ProjectileGameplayBridgeImpl::Kill()
@@ -270,6 +360,37 @@ void Aoe2ProjectileGameplayBridgeImpl::QueueEvent(LifecycleEventType type, const
 		return;
 	std::scoped_lock lock(eventMutex);
 	queuedEvents.push_back({type, static_cast<std::uint32_t>(projectile->id), reinterpret_cast<std::uintptr_t>(projectile)});
+}
+
+bool Aoe2ProjectileGameplayBridgeImpl::Explosion(
+	int weaponDefID,
+	const WeaponDef* weaponDef,
+	const CExplosionParams& params
+)
+{
+	// This is a visual observer. Returning false is required so native gameplay
+	// and CEG handling retain their original semantics.
+	if (!enabled.load(std::memory_order_acquire) || weaponDef == nullptr || weaponDefID < 0 ||
+		static_cast<std::size_t>(weaponDefID) >= mappings.size())
+		return false;
+	const auto& mapping = mappings[weaponDefID];
+	if (!mapping.impactEffectUsable || maxEffects == 0)
+		return false;
+
+	const bool visible = explGenHandler.PredictExplosionVisible(weaponDef, params, gu->myAllyTeam);
+	std::scoped_lock lock(eventMutex);
+	if (queuedExplosionEvents.size() >= maxEffects) {
+		droppedEffects.fetch_add(1, std::memory_order_relaxed);
+		return false;
+	}
+	queuedExplosionEvents.push_back({
+		params.pos,
+		params.dir,
+		static_cast<std::uint32_t>(weaponDefID),
+		gs->frameNum,
+		visible,
+	});
+	return false;
 }
 
 bool Aoe2ProjectileGameplayBridgeImpl::IsMappedProjectile(const CProjectile* projectile, std::uint32_t* mappingIndex) const
@@ -366,6 +487,100 @@ void Aoe2ProjectileGameplayBridgeImpl::ProcessEvents()
 	processingEvents.clear();
 }
 
+void Aoe2ProjectileGameplayBridgeImpl::ProcessExplosionEvents()
+{
+	{
+		std::scoped_lock lock(eventMutex);
+		queuedExplosionEvents.swap(processingExplosionEvents);
+	}
+	for (const ExplosionEvent& event : processingExplosionEvents)
+		AddEffect(event);
+	processingExplosionEvents.clear();
+}
+
+bool Aoe2ProjectileGameplayBridgeImpl::AddEffect(const ExplosionEvent& event)
+{
+	if (event.mappingIndex >= mappings.size() || freeEffectSlots.empty()) {
+		droppedEffects.fetch_add(1, std::memory_order_relaxed);
+		return false;
+	}
+	const auto& mapping = mappings[event.mappingIndex];
+	if (!mapping.impactEffectUsable)
+		return false;
+
+	const std::uint32_t slotIndex = freeEffectSlots.back();
+	freeEffectSlots.pop_back();
+	const std::uint32_t alpha = static_cast<std::uint32_t>(
+		std::clamp(std::lround(mapping.impactEffectAlpha * 255.0f), 0l, 255l));
+	Aoe2UnitInstanceDesc desc;
+	desc.appearance = mapping.impactEffectAppearance;
+	desc.position = event.position;
+	desc.position.y += mapping.impactEffectHeightOffset;
+	desc.scale = mapping.impactEffectScale;
+	desc.animation = Aoe2UnitAnimationSlot::IdleA;
+	desc.animationTime = 0.0f;
+	desc.playbackSpeed = 1.0f;
+	desc.tintRgba8 = (alpha << 24u) | 0x00FFFFFFu;
+	desc.visible = event.visible;
+	desc.stableDepthOrdering = false;
+	const Aoe2InstanceHandle instance = CAoe2UnitRenderer::CreateInstance(desc);
+	if (!instance) {
+		freeEffectSlots.push_back(slotIndex);
+		const std::uint64_t dropped = droppedEffects.fetch_add(1, std::memory_order_relaxed) + 1;
+		if (dropped == 1) {
+			LOG_L(L_ERROR, "[Aoe2ProjectileBridge] failed to create an AOE impact effect instance; subsequent failures are counted in diagnostics");
+		}
+		return false;
+	}
+
+	auto& slot = effectSlots[slotIndex];
+	slot = {};
+	slot.instance = instance;
+	slot.activeIndex = static_cast<std::uint32_t>(activeEffectSlots.size());
+	slot.durationSeconds = mapping.impactEffectDuration;
+	slot.visible = event.visible;
+	activeEffectSlots.push_back(slotIndex);
+	++diagnostics.spawnedEffects;
+	diagnostics.liveEffects = static_cast<std::uint32_t>(activeEffectSlots.size());
+	return true;
+}
+
+void Aoe2ProjectileGameplayBridgeImpl::RemoveEffect(std::uint32_t slotIndex)
+{
+	if (slotIndex >= effectSlots.size())
+		return;
+	auto& slot = effectSlots[slotIndex];
+	if (!slot.IsActive())
+		return;
+	CAoe2UnitRenderer::DestroyInstance(slot.instance);
+	const std::uint32_t activeIndex = slot.activeIndex;
+	const std::uint32_t movedSlotIndex = activeEffectSlots.back();
+	activeEffectSlots[activeIndex] = movedSlotIndex;
+	activeEffectSlots.pop_back();
+	if (activeIndex < activeEffectSlots.size())
+		effectSlots[movedSlotIndex].activeIndex = activeIndex;
+	slot = {};
+	freeEffectSlots.push_back(slotIndex);
+	diagnostics.liveEffects = static_cast<std::uint32_t>(activeEffectSlots.size());
+}
+
+void Aoe2ProjectileGameplayBridgeImpl::UpdateEffects(float deltaSeconds)
+{
+	diagnostics.visibleEffects = 0;
+	for (std::size_t index = 0; index < activeEffectSlots.size();) {
+		const std::uint32_t slotIndex = activeEffectSlots[index];
+		auto& slot = effectSlots[slotIndex];
+		slot.elapsedSeconds += deltaSeconds;
+		if (slot.elapsedSeconds >= slot.durationSeconds) {
+			RemoveEffect(slotIndex);
+			continue;
+		}
+		diagnostics.visibleEffects += slot.visible;
+		++index;
+	}
+	diagnostics.droppedEffects = droppedEffects.load(std::memory_order_relaxed);
+}
+
 void Aoe2ProjectileGameplayBridgeImpl::UpdateProjectile(std::uint32_t projectileId, CProjectile* projectile)
 {
 	auto& slot = slots[projectileId];
@@ -395,6 +610,7 @@ void Aoe2ProjectileGameplayBridgeImpl::Update()
 		Disable();
 	if (enabled.load(std::memory_order_acquire)) {
 		ProcessEvents();
+		ProcessExplosionEvents();
 		diagnostics.visibleInstances = 0;
 		for (std::size_t i = 0; i < activeProjectileIds.size();) {
 			const std::uint32_t projectileId = activeProjectileIds[i];
@@ -408,13 +624,17 @@ void Aoe2ProjectileGameplayBridgeImpl::Update()
 			diagnostics.visibleInstances += CProjectileDrawer::CanDrawProjectile(projectile, projectile->GetAllyteamID());
 			++i;
 		}
+		const float deltaSeconds = std::clamp(globalRendering->lastFrameTime * 0.001f, 0.0f, 0.1f);
+		UpdateEffects(deltaSeconds);
 	}
 	diagnostics.cpuUpdateMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 	const auto now = std::chrono::steady_clock::now();
 	if (configHandler->GetBool("Aoe2ProjectileGameplayDiagnostics") && now - lastDiagnostics >= std::chrono::seconds(1)) {
-		LOG_L(L_INFO, "[Aoe2ProjectileBridge] enabled=%d mappedDefs=%u live=%u visible=%u CPU=%.3fms",
-			enabled.load(std::memory_order_relaxed), diagnostics.mappedWeaponDefs, diagnostics.liveInstances,
-			diagnostics.visibleInstances, diagnostics.cpuUpdateMs);
+		LOG_L(L_INFO, "[Aoe2ProjectileBridge] enabled=%d mappedDefs=%u mappedEffectDefs=%u projectiles=%u/%u effects=%u/%u spawned=%llu dropped=%llu CPU=%.3fms",
+			enabled.load(std::memory_order_relaxed), diagnostics.mappedWeaponDefs, diagnostics.mappedEffectWeaponDefs,
+			diagnostics.liveInstances, diagnostics.visibleInstances, diagnostics.liveEffects, diagnostics.visibleEffects,
+			static_cast<unsigned long long>(diagnostics.spawnedEffects),
+			static_cast<unsigned long long>(diagnostics.droppedEffects), diagnostics.cpuUpdateMs);
 		lastDiagnostics = now;
 	}
 }

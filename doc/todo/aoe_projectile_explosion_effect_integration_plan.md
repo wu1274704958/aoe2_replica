@@ -1,5 +1,9 @@
 # AOE Projectile Explosion Effect 通用接入方案
 
+> 实施状态（2026-09-14）：通用 exporter、`TimeOnce` renderer、Explosion 事件桥、
+> `smoke_hit` 资源与手推炮配置均已完成。导出器回归测试、Windows 完整构建及手推炮
+> 校准场景运行验证通过；运行中效果实例可按 1.5 秒生命周期归零，未出现丢弃或泄漏。
+
 ## 1. 结论与当前样本
 
 手推炮 Projectile DAT Unit `368` 的飞行 Graphic 是 `3382`（`p_ball_x1`），命中后使用
@@ -27,7 +31,7 @@ Building 和“飞行中的 Projectile”实例，没有命中事件驱动的一
 - Recoil Projectile/Weapon 继续负责命中时机、命中位置、范围伤害和同步状态。
 - AOE Effect 只消费只读的命中事件快照，不参与伤害、碰撞或 Projectile 生命周期。
 - Effect 使用独立、非循环的资源语义，不把它伪装成飞行 Projectile 或 Unit Idle。
-- 不保留原生 CEG 保留为资源缺失时的回退；AOE Effect 创建失败不显示，记录error log。
+- 不保留原生 CEG 作为资源缺失时的回退；AOE Effect 创建失败时不显示，并记录错误日志。
 
 ## 3. gld exporter 扩展
 
@@ -95,7 +99,8 @@ Atlas 可裁掉透明边界，但每帧必须根据原始 `300 x 300` 画布中�
 - `PreloadEffectAppearance(effectId)`：读取 `effects/<id>/manifest.json`；
 - 一次性采样模式 `TimeOnce`，采样到最后一帧后不回绕；
 - Effect appearance 不创建 player-color 和 shadow texture；
-- Effect instance 默认关闭稳定脚点深度桶，并使用摄像机朝向 Billboard；
+- Effect instance 默认关闭稳定脚点深度桶，并使用摄像机朝向 Billboard；画布中心锚点以下的
+  像素仍使用通用的摄像机侧地形深度修正，避免地面命中特效被地形裁切；
 - 主体深度测试开启、深度写入关闭，避免烟雾遮挡后续透明效果或写坏地形深度。
 
 不要把 Effect 填入 `IdleA` 再依靠外部恰好及时删除来规避循环。资源类型、采样模式和生命周期
@@ -142,8 +147,8 @@ Projectile 类型相关魔法常量。
 1. 用扩展后的 exporter 导出 `smoke_hit`。
 2. 将 `effects/smoke_hit` 同步到 Recoil `cont/aoe2de_cache/effects/`。
 3. 给 `aoe_bombard_cannon_shot` 增加 effect customParams。
-4. AOE effect 加载成功时，将当前 `AOE_BOMBARD_IMPACT` 降级为声音/轻量地面反馈，避免主烟雾
-   重叠；资源加载失败时继续使用现有 CEG。
+4. 将 `AOE_BOMBARD_IMPACT` 设为空的 custom CEG，阻止 Recoil 回退到标准爆炸表现；命中声音
+   仍由 WeaponDef 独立播放。资源加载或实例创建失败时只记录诊断，不生成另一套视觉效果。
 5. `cegTag` 飞行尾烟和 muzzle CEG 与 impact effect 分开配置，互不影响。
 
 ## 6. 验证顺序
@@ -153,7 +158,18 @@ Projectile 类型相关魔法常量。
 3. Bombard 校准场景：分别命中地面、Unit 和 Building，确认命中位置一致。
 4. 双队 16v16：确认爆炸触发、LOS、资源回收和原生伤害不变。
 5. 双队 100v100：记录 CPU/GPU 时间、Draw Call、峰值 live effects 和 dropped 数量。
-6. 关闭 AOE Projectile Bridge：原生 CEG 行为与接入前一致。
+6. 关闭 AOE Projectile Bridge：Gameplay 伤害与命中声音不变，但按边界原则不再显示 impact CEG。
+
+## 8. 实际验证结果
+
+- exporter：`python -m unittest tools.aoe2de_export.tests.test_aoe2de_export` 全部通过；
+- 真实资源：成功导出 40 帧、300 × 300 RGBA、1.5 秒的 `smoke_hit`；
+- 引擎：Windows 无缓存完整构建成功；
+- 运行：手推炮校准场景连续多轮命中均生成 Effect，峰值实例能够在播放结束后回到 0，
+  `droppedEffects=0`；
+- 性能：事件/free/active 容器和 renderer handle storage 预留容量，创建/销毁为 O(1)，
+  活跃效果更新为 O(M)；同一 effect 共享 atlas 并合批；
+- 显存：`smoke_hit` atlas 为 2100 × 1800 RGBA8，约 14.4 MiB，所有实例共享一份纹理。
 
 ## 7. 不推荐的捷径
 

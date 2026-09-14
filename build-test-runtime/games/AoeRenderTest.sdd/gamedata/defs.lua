@@ -931,6 +931,9 @@ return {
 				aoe2_projectile_scale = "1.0",
 				aoe2_projectile_source_unit_id = "368",
 				aoe2_projectile_source_graphic_id = "3382",
+				aoe2_projectile_impact_effect_id = "smoke_hit",
+				aoe2_projectile_impact_effect_scale = "2.5",
+				aoe2_projectile_impact_effect_height_offset = "0.0",
 			},
 		},
 		aoe_tower_arrow = {

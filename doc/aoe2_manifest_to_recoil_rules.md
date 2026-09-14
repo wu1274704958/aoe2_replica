@@ -23,6 +23,7 @@
 | `kind = aoe2de_unit` | 3 | Unit Sprite、动画和部分 DAT Gameplay 元数据 |
 | `kind = aoe2de_building` | 4 | Building Sprite、状态、锚点和部分 DAT Gameplay 元数据 |
 | `kind = aoe2de_graphics` | 2 | Projectile Sprite 和采样语义 |
+| `kind = aoe2de_effect` | 1 | 一次性 Projectile 命中特效及生命周期 |
 
 每次转换必须在报告中记录 manifest schema、`dat.source`、`dat.civ_id`、
 `dat.unit_id`、conversion profile 版本及人工 override 来源。来源优先级为：
@@ -45,6 +46,9 @@ Attack/Armor 数组、资源成本和全部移动参数；这些字段在 export
 - DAT Unit ID 和 Graphic ID 分别写入
   `aoe2_projectile_source_unit_id`、`aoe2_projectile_source_graphic_id`，用于追溯，
   不参与运行时 Gameplay。
+- Effect manifest `id` 写入
+  `WeaponDef.customParams.aoe2_projectile_impact_effect_id`；manifest 自带 `scale`
+  是资源基础缩放，WeaponDef 的 `_scale` 是实例乘数，二者相乘。
 - Recoil Def 名称使用小写 snake_case；AOE 资源 ID 保持 exporter 输出，不得改写。
 
 ## 坐标系和长度换算
@@ -152,6 +156,27 @@ resurrectable = 0,
 - `sampling_mode = time_loop`：按时间循环播放，例如 `p_ball` 的 1×30 帧动画。
 - `sampling_mode = timeline`：普通时间轴动画。
 - Projectile 每帧 `foot` 仅用于渲染对齐，不写入 WeaponDef，也不改变原生碰撞原点。
+
+### Projectile impact effect
+
+- `sampling_mode = time_once`：从首帧单次播放到末帧，不允许循环。
+- `duration_seconds` 控制实例回收；运行时不得通过猜测 FPS 重算生命周期。
+- `scale`、`alpha` 是资源级默认值；`anchor` 必须使用 exporter 记录的原始画布中心。
+- Effect 只负责非同步视觉，命中位置、LOS、伤害和范围爆炸仍由 Recoil Gameplay 决定。
+- 可选实例覆盖使用以下 WeaponDef 字段：
+
+```lua
+customParams = {
+    aoe2_projectile_impact_effect_id = "smoke_hit",
+    aoe2_projectile_impact_effect_scale = "1.0",
+    aoe2_projectile_impact_effect_height_offset = "0.0",
+}
+```
+
+未配置 `_scale` 和 `_height_offset` 时分别使用 `1.0` 和 `0.0`。不得用 Shader 中的
+Projectile 类型判断或零散常量修正位置。当前 `smoke_hit` 使用 AOE Effect 独占 impact
+视觉；对应 native custom CEG 应为空，避免两套效果重叠，但原生命中声音与 Gameplay
+爆炸不得关闭。
 
 ## Gameplay 字段转换
 

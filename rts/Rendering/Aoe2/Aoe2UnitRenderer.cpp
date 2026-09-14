@@ -152,6 +152,12 @@ struct Appearance {
 	std::array<bool, AOE2_ANIMATION_SLOT_COUNT> requirePlayerColor{};
 	int attackReleaseFrame = 0;
 	float cullRadiusPixels = 0.0f;
+	float effectDurationSeconds = 0.0f;
+	float effectScale = 1.0f;
+	float effectAlpha = 1.0f;
+	bool isEffect = false;
+	bool mainDepthWrite = true;
+	bool terrainDepthAdjustment = true;
 };
 
 struct Instance {
@@ -534,6 +540,7 @@ public:
 	Aoe2AppearanceHandle Preload(const std::string& unitId);
 	Aoe2AppearanceHandle PreloadBuilding(const std::string& buildingId);
 	Aoe2AppearanceHandle PreloadGraphics(const std::string& graphicsId);
+	Aoe2AppearanceHandle PreloadEffect(const std::string& effectId);
 	Aoe2InstanceHandle Create(const Aoe2UnitInstanceDesc& desc);
 	bool Destroy(Aoe2InstanceHandle handle);
 	Instance* Get(Aoe2InstanceHandle handle);
@@ -544,7 +551,7 @@ public:
 	void RebuildBatches();
 	void SetupBatch(GpuBatch& batch);
 	void UploadBatch(GpuBatch& batch);
-	void DrawBatch(const Animation& animation, GpuBatch& batch, bool shadow);
+	void DrawBatch(const Animation& animation, GpuBatch& batch, bool shadow, bool terrainDepthAdjustment);
 	Animation LoadAnimation(
 		const std::filesystem::path& configPath,
 		const std::string& expectedName,
@@ -712,6 +719,8 @@ Animation Aoe2RendererImpl::LoadAnimation(
 			animation.samplingMode = Aoe2AnimationSamplingMode::PitchPose;
 		else if (samplingMode == "time_loop")
 			animation.samplingMode = Aoe2AnimationSamplingMode::TimeLoop;
+		else if (samplingMode == "time_once")
+			animation.samplingMode = Aoe2AnimationSamplingMode::TimeOnce;
 		else
 			throw std::runtime_error("unsupported animation sampling mode");
 	}
@@ -1004,6 +1013,79 @@ Aoe2AppearanceHandle Aoe2RendererImpl::PreloadGraphics(const std::string& graphi
 	}
 }
 
+Aoe2AppearanceHandle Aoe2RendererImpl::PreloadEffect(const std::string& effectId)
+{
+	const std::string cacheId = "effects/" + effectId;
+	for (std::size_t i = 0; i < appearances.size(); ++i) {
+		if (appearances[i] != nullptr && appearances[i]->id == cacheId)
+			return {static_cast<std::uint32_t>(i), appearances[i]->generation};
+	}
+
+	std::unique_ptr<Appearance> appearance;
+	try {
+		const auto manifestPath = cacheRoot / "effects" / effectId / "manifest.json";
+		simdjson::dom::parser parser;
+		simdjson::dom::element document;
+		if (const auto error = parser.load(manifestPath.string()).get(document); error != simdjson::SUCCESS)
+			throw std::runtime_error("failed to parse effect manifest: " + std::string(simdjson::error_message(error)));
+		if (document["schema_version"].get_int64().value() != 1 ||
+			GetString(document["kind"]) != "aoe2de_effect" || GetString(document["id"]) != effectId ||
+			GetString(document["playback"]) != "once" || GetString(document["stop_mode"]) != "complete")
+			throw std::runtime_error("unsupported effect manifest");
+
+		const float durationSeconds = static_cast<float>(document["duration_seconds"].get_double().value());
+		const float scale = static_cast<float>(document["scale"].get_double().value());
+		const float alpha = static_cast<float>(document["alpha"].get_double().value());
+		if (!std::isfinite(durationSeconds) || durationSeconds <= 0.0f ||
+			!std::isfinite(scale) || scale <= 0.0f ||
+			!std::isfinite(alpha) || alpha < 0.0f || alpha > 1.0f)
+			throw std::runtime_error("invalid effect timing or appearance values");
+
+		simdjson::dom::object animationEntry;
+		if (const auto error = document["animation"].get_object().get(animationEntry); error != simdjson::SUCCESS ||
+			GetString(animationEntry["status"]) != "exported")
+			throw std::runtime_error("effect animation is unavailable");
+
+		appearance = std::make_unique<Appearance>();
+		appearance->id = cacheId;
+		appearance->isEffect = true;
+		appearance->mainDepthWrite = false;
+		// Ground impacts can contain visible pixels below their center anchor.
+		// Keep the per-pixel camera-side terrain correction enabled so those
+		// pixels do not enter the terrain depth buffer. Effect instances still
+		// opt out of stable depth buckets through stableDepthOrdering=false.
+		appearance->terrainDepthAdjustment = true;
+		appearance->effectDurationSeconds = durationSeconds;
+		appearance->effectScale = scale;
+		appearance->effectAlpha = alpha;
+		appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = LoadAnimation(
+			manifestPath.parent_path() / GetString(animationEntry["config"]), effectId, false,
+			Aoe2AnimationSamplingMode::TimeOnce);
+		appearance->loaded[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)] = true;
+		const auto& animation = appearance->animations[AnimationIndex(Aoe2UnitAnimationSlot::IdleA)];
+		if (animation.samplingMode != Aoe2AnimationSamplingMode::TimeOnce)
+			throw std::runtime_error("effect animation must use time_once sampling");
+		const float animationDuration = animation.framesPerDirection / animation.fps;
+		if (std::abs(animationDuration - durationSeconds) > std::max(0.001f, 0.5f / animation.fps))
+			throw std::runtime_error("effect manifest and animation durations differ");
+		IncludeAnimationRenderBounds(*appearance, animation);
+		diagnostics.textureBytes += animation.main.textureBytes + animation.shadow.textureBytes + animation.playerColor.textureBytes;
+		const auto index = static_cast<std::uint32_t>(appearances.size());
+		appearances.push_back(std::move(appearance));
+		return {index, appearances.back()->generation};
+	} catch (const std::exception& error) {
+		if (appearance != nullptr) {
+			for (auto& animation : appearance->animations) {
+				DeleteLayerTexture(animation.main);
+				DeleteLayerTexture(animation.shadow);
+				DeleteLayerTexture(animation.playerColor);
+			}
+		}
+		LOG_L(L_ERROR, "[Aoe2UnitRenderer] failed to preload effect %s: %s", effectId.c_str(), error.what());
+		return {};
+	}
+}
+
 Aoe2InstanceHandle Aoe2RendererImpl::Create(const Aoe2UnitInstanceDesc& desc)
 {
 	if (!desc.appearance || desc.appearance.index >= appearances.size() ||
@@ -1133,7 +1215,9 @@ void Aoe2RendererImpl::RebuildBatches()
 		++diagnostics.visibleInstances;
 		const int direction = DirectionForHeading(instance.heading, animation.directionCount);
 		const int sampledFrame = static_cast<int>(std::floor(instance.animationTime * animation.fps));
-		const int frameNumber = AnimationLoops(instance.animation)
+		const bool loops = animation.samplingMode == Aoe2AnimationSamplingMode::TimeLoop ||
+			(animation.samplingMode == Aoe2AnimationSamplingMode::Timeline && AnimationLoops(instance.animation));
+		const int frameNumber = loops
 			? sampledFrame % animation.framesPerDirection
 			: std::min(sampledFrame, animation.framesPerDirection - 1);
 		const int frameIndex = direction * animation.framesPerDirection + frameNumber;
@@ -1356,7 +1440,12 @@ void Aoe2RendererImpl::UploadBatch(GpuBatch& batch)
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-void Aoe2RendererImpl::DrawBatch(const Animation& animation, GpuBatch& batch, bool shadow)
+void Aoe2RendererImpl::DrawBatch(
+	const Animation& animation,
+	GpuBatch& batch,
+	bool shadow,
+	bool terrainDepthAdjustment
+)
 {
 	if (batch.world.empty())
 		return;
@@ -1369,9 +1458,9 @@ void Aoe2RendererImpl::DrawBatch(const Animation& animation, GpuBatch& batch, bo
 	// Shadow frames have their own foot anchors and may contain pixels below
 	// them. Reuse the main-sprite terrain clearance without applying stable
 	// depth buckets to the non-depth-writing shadow pass.
-	shader->SetUniform("uBelowFootCameraBiasScale", belowFootCameraBiasScale);
-	shader->SetUniform("uBelowFootDepthSafety", belowFootDepthSafety);
-	shader->SetUniform("uDepthBucketSize", shadow ? 0.0f : depthBucketSize);
+	shader->SetUniform("uBelowFootCameraBiasScale", terrainDepthAdjustment ? belowFootCameraBiasScale : 0.0f);
+	shader->SetUniform("uBelowFootDepthSafety", terrainDepthAdjustment ? belowFootDepthSafety : 0.0f);
+	shader->SetUniform("uDepthBucketSize", (!shadow && terrainDepthAdjustment) ? depthBucketSize : 0.0f);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, shadow ? animation.shadow.texture : animation.main.texture);
 	if (!shadow) {
@@ -1475,14 +1564,21 @@ void Aoe2RendererImpl::Draw()
 	for (auto& appearancePtr : appearances) {
 		if (appearancePtr == nullptr) continue;
 		for (auto& animation : appearancePtr->animations)
-			DrawBatch(animation, animation.shadowBatch, true);
+			DrawBatch(animation, animation.shadowBatch, true, appearancePtr->terrainDepthAdjustment);
 	}
 
 	glDepthMask(GL_TRUE);
 	for (auto& appearancePtr : appearances) {
-		if (appearancePtr == nullptr) continue;
+		if (appearancePtr == nullptr || !appearancePtr->mainDepthWrite) continue;
 		for (auto& animation : appearancePtr->animations)
-			DrawBatch(animation, animation.mainBatch, false);
+			DrawBatch(animation, animation.mainBatch, false, appearancePtr->terrainDepthAdjustment);
+	}
+
+	glDepthMask(GL_FALSE);
+	for (auto& appearancePtr : appearances) {
+		if (appearancePtr == nullptr || appearancePtr->mainDepthWrite) continue;
+		for (auto& animation : appearancePtr->animations)
+			DrawBatch(animation, animation.mainBatch, false, appearancePtr->terrainDepthAdjustment);
 	}
 
 	glActiveTexture(GL_TEXTURE1);
@@ -1563,6 +1659,11 @@ Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadGraphicsAppearance(const std::str
 	return (renderer != nullptr) ? renderer->PreloadGraphics(graphicsId) : Aoe2AppearanceHandle{};
 }
 
+Aoe2AppearanceHandle CAoe2UnitRenderer::PreloadEffectAppearance(const std::string& effectId)
+{
+	return (renderer != nullptr) ? renderer->PreloadEffect(effectId) : Aoe2AppearanceHandle{};
+}
+
 bool CAoe2UnitRenderer::GetAnimationInfo(
 	Aoe2AppearanceHandle appearance,
 	Aoe2UnitAnimationSlot animationSlot,
@@ -1581,11 +1682,28 @@ bool CAoe2UnitRenderer::GetAnimationInfo(
 	info.fps = animation.fps;
 	info.frameCount = static_cast<std::uint32_t>(animation.framesPerDirection);
 	info.durationSeconds = animation.framesPerDirection / animation.fps;
-	info.loop = AnimationLoops(animationSlot);
+	info.loop = animation.samplingMode == Aoe2AnimationSamplingMode::TimeLoop ||
+		(animation.samplingMode == Aoe2AnimationSamplingMode::Timeline && AnimationLoops(animationSlot));
 	info.samplingMode = animation.samplingMode;
 	info.releaseTimeSeconds = (animationSlot == Aoe2UnitAnimationSlot::AttackA)
 		? std::clamp(appearancePtr->attackReleaseFrame / animation.fps, 0.0f, info.durationSeconds)
 		: 0.0f;
+	return true;
+}
+
+bool CAoe2UnitRenderer::GetEffectAppearanceInfo(
+	Aoe2AppearanceHandle appearance,
+	Aoe2EffectAppearanceInfo& info
+)
+{
+	if (renderer == nullptr || !appearance || appearance.index >= renderer->appearances.size())
+		return false;
+	const auto& appearancePtr = renderer->appearances[appearance.index];
+	if (appearancePtr == nullptr || appearancePtr->generation != appearance.generation || !appearancePtr->isEffect)
+		return false;
+	info.durationSeconds = appearancePtr->effectDurationSeconds;
+	info.scale = appearancePtr->effectScale;
+	info.alpha = appearancePtr->effectAlpha;
 	return true;
 }
 
@@ -1595,6 +1713,13 @@ bool CAoe2UnitRenderer::GetAppearanceRenderBounds(
 )
 {
 	return renderer != nullptr && renderer->GetAppearanceRenderBounds(appearance, bounds);
+}
+
+void CAoe2UnitRenderer::ReserveAdditionalInstances(std::size_t additionalInstances)
+{
+	if (renderer == nullptr || additionalInstances == 0)
+		return;
+	renderer->instances.reserve(renderer->instances.size() + additionalInstances);
 }
 
 Aoe2InstanceHandle CAoe2UnitRenderer::CreateInstance(const Aoe2UnitInstanceDesc& desc)

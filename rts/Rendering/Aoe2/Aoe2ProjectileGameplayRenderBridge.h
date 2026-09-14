@@ -8,8 +8,13 @@ class CProjectile;
 
 struct Aoe2ProjectileGameplayBridgeDiagnostics {
 	std::uint32_t mappedWeaponDefs = 0;
+	std::uint32_t mappedEffectWeaponDefs = 0;
 	std::uint32_t liveInstances = 0;
 	std::uint32_t visibleInstances = 0;
+	std::uint32_t liveEffects = 0;
+	std::uint32_t visibleEffects = 0;
+	std::uint64_t spawnedEffects = 0;
+	std::uint64_t droppedEffects = 0;
 	double cpuUpdateMs = 0.0;
 };
 

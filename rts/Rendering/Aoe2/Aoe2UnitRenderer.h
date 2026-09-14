@@ -27,6 +27,7 @@ enum class Aoe2AnimationSamplingMode : std::uint8_t {
 	Timeline,
 	PitchPose,
 	TimeLoop,
+	TimeOnce,
 };
 
 struct Aoe2UnitAnimationInfo {
@@ -41,6 +42,12 @@ struct Aoe2UnitAnimationInfo {
 struct Aoe2AppearanceRenderBounds {
 	// Conservative sphere radius around the sprite foot, in Recoil world units.
 	float radius = 0.0f;
+};
+
+struct Aoe2EffectAppearanceInfo {
+	float durationSeconds = 0.0f;
+	float scale = 1.0f;
+	float alpha = 1.0f;
 };
 
 struct Aoe2AppearanceHandle {
@@ -105,8 +112,13 @@ public:
 	static Aoe2AppearanceHandle PreloadBuildingAppearance(const std::string& buildingId);
 	// Loads an exported graphics cache entry into the shared sprite batches.
 	static Aoe2AppearanceHandle PreloadGraphicsAppearance(const std::string& graphicsId);
+	// Loads an exported one-shot effect cache entry into a non-depth-writing batch.
+	static Aoe2AppearanceHandle PreloadEffectAppearance(const std::string& effectId);
 	static bool GetAnimationInfo(Aoe2AppearanceHandle appearance, Aoe2UnitAnimationSlot animation, Aoe2UnitAnimationInfo& info);
+	static bool GetEffectAppearanceInfo(Aoe2AppearanceHandle appearance, Aoe2EffectAppearanceInfo& info);
 	static bool GetAppearanceRenderBounds(Aoe2AppearanceHandle appearance, Aoe2AppearanceRenderBounds& bounds);
+	// Reserves handle storage up front for bridges with a fixed instance budget.
+	static void ReserveAdditionalInstances(std::size_t additionalInstances);
 	static Aoe2InstanceHandle CreateInstance(const Aoe2UnitInstanceDesc& desc);
 	static bool DestroyInstance(Aoe2InstanceHandle handle);
 	static bool SetTransform(Aoe2InstanceHandle handle, const float3& position, float headingRadians, float scale);

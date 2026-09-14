@@ -51,9 +51,10 @@ the renderer advance those frames by time while gameplay orientation continues
 to come from the projectile velocity. Existing arrow-like resources without
 this metadata retain the legacy `pitch_pose` fallback.
 
-The release-frame muzzle flash/smoke, projectile trail and impact use native
-Recoil CEGs in `gamedata/explosions/aoe_bombard.lua`. The dedicated Unit script
-spawns the muzzle CEG from Recoil's live weapon vector in `script.Shot`, so it
+The release-frame muzzle flash/smoke and projectile trail use native Recoil
+CEGs in `gamedata/explosions/aoe_bombard.lua`. The impact uses the exported
+`effects/smoke_hit` one-shot atlas through the AOE Projectile Bridge. The
+dedicated Unit script spawns the muzzle CEG from Recoil's live weapon vector in `script.Shot`, so it
 tracks the calibrated AOE muzzle in every direction. The two test sounds are
 existing springcontent placeholders, not exported AOE media.
 
@@ -90,7 +91,9 @@ remains at 480 elmos for uncluttered visual calibration.
 - Recoil's native radial splash is used. Exact AOE blast attack/defense-level
   filtering is not implemented.
 - `collideNonTarget = false` keeps the selected target/ground endpoint stable;
-  the impact explosion still applies native area damage.
+  the impact explosion still applies native area damage. Its native custom CEG
+  is intentionally empty to avoid drawing a second impact effect; hit sound is
+  configured independently on the WeaponDef.
 - Sound assets are test placeholders and need art/audio review before release.
 - The test UnitDef is hand-authored from DAT. Automatic UnitDef/WeaponDef
   generation remains separate work.
