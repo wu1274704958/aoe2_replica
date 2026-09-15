@@ -516,6 +516,9 @@ bool Aoe2ProjectileGameplayBridgeImpl::AddEffect(const ExplosionEvent& event)
 	desc.appearance = mapping.impactEffectAppearance;
 	desc.position = event.position;
 	desc.position.y += mapping.impactEffectHeightOffset;
+	const float horizontalDirectionSq = event.direction.x * event.direction.x + event.direction.z * event.direction.z;
+	if (horizontalDirectionSq > MIN_HEADING_SPEED_SQ)
+		desc.headingRadians = std::atan2(event.direction.x, event.direction.z);
 	desc.scale = mapping.impactEffectScale;
 	desc.animation = Aoe2UnitAnimationSlot::IdleA;
 	desc.animationTime = 0.0f;

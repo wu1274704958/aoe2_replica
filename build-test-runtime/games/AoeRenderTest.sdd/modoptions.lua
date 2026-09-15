@@ -49,6 +49,7 @@ return {
 			{ key = "aoe_crossbowman", name = "Crossbowman" },
 			{ key = "aoe_hand_cannoneer", name = "Hand Cannoneer" },
 			{ key = "aoe_bombard_cannon", name = "Bombard Cannon" },
+			{ key = "aoe_mangonel", name = "Mangonel" },
 		},
 	},
 	aoe_anchor_calibration_target_unit = {

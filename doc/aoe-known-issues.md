@@ -169,3 +169,61 @@ Gameplay Bridge 每帧直接将 `unit->drawPos` 传给 `CAoe2UnitRenderer::SetTr
 4. 优先验证可在 Shader 或实例数据中完成的 O(N) 深度量化，保持现有按资源/动画的 Instanced Rendering，不引入成员两两比较。
 5. 以“全局按脚点深度从后向前排序、对 AOE 主体关闭深度写入”作为正确性对照基线；该方案能确认二维 Sprite 的期望遮挡，但会破坏跨资源合批，不应直接作为万级单位的最终实现。
 6. 专项验证正交/透视相机、斜坡、建筑、Projectile、尸体 Feature、地形遮挡，以及深度桶边界附近的低速移动。当前已确认固定分桶仍可能在边界留下少量切换；是否实施上节记录的单实例滞回，应根据后续观感和性能回归决定。
+
+## 3. AOE2DE 原生 Wwise 音效尚不能按事件 ID 播放
+
+### 状态
+
+- 问题状态：已完成资源引用链调研，当前暂缓实施。
+- 根因状态：已确认。
+- 影响资源：当前所有需要复刻 AOE2DE 原生攻击、命中、移动和选择音效的 AOE Unit/Building；已接入的小型抛石机和手推炮仍使用测试占位音效。
+
+### 表现
+
+当前 WeaponDef 只能把 `soundStart`、`soundHitDry` 和 `soundHitWet` 配置为 Recoil
+可直接加载的 WAV/OGG 文件或已注册声音项，不能像 AOE2DE 一样提交 Wwise Event ID，
+因此无法直接复用 AOE2DE SoundBank 内的随机选择、防重复、分层混音、Switch/State 和
+Bus 音量规则。
+
+### 已确认根因
+
+Recoil 当前声音实现使用 OpenAL，没有集成 Wwise Runtime，也没有 PCK/BNK Event Graph
+解析器。AOE2DE 的 `wwise/Base.pck` 中保存的是 SoundBank 和 WEM；DAT/Graphic 记录的
+32-bit Wwise Event ID 并不是可由 OpenAL 直接解码的音频文件 ID。
+
+调研确认的代表性引用如下：
+
+- 小型抛石机 DAT Unit 280 的 Attack Graphic 979 在所有 16 个方向的第 6 帧触发
+  `PLAY_ATTACK_MANGONEL`（Event ID `1791648398`），事件从
+  `Mangonel_Large_Attack_01..04` 四个音源中随机选择并避免连续重复。
+- 手推炮 DAT Unit 36 的 Attack Graphic 654 在所有 16 个方向的第 7 帧触发
+  `PLAY_ATTACK_BOMBARD_CANNON`（Event ID `1775735096`），事件从
+  `Cannon_Small_Fire_01..08` 八个音源中随机选择。
+- 手推炮命中使用 `PLAY_IMPACT_CANNONBALL_SPLASH`（Event ID `3865779263`）的四个
+  随机音源。小型抛石机另有地面、石材、木材三类命中事件；其中地面事件还会同时
+  播放一层随机攻城弹命中声和一层随机小型建筑爆炸声。
+
+当前 `WeaponDef::LoadSound()` 对开火声只读取一个字符串；命中 `GuiSoundSet` 的两个
+固定位置又分别代表 dry/wet，不能直接承载每种介质各自的随机池和分层事件。即使扩展
+Lua 配置为数组，也只能解决一部分随机开火声，不能完整复刻 Wwise 事件语义。
+
+### 当前决策与后续方向
+
+现阶段不导出 AOE2DE 音频，也不把随机事件降级成单个代表样本；现有测试占位音效暂时
+保留。后续若重新启动该任务，优先评估独立的 Wwise 音频后端：加载兼容版本的 Init/SFX
+SoundBank，通过 Event ID 播放，并为 Gameplay 对象同步三维位置和必要的 Switch/State。
+实施前必须先确认 Wwise SDK 授权、AOE2DE 本地资源使用边界、SoundBank 版本兼容和
+AOE2DE 更新后的稳定性。
+
+如果最终采用按 Event ID 播放，gld exporter 不应导出或解码音频；它只需要从
+`Graphic.angle_sounds` 提取触发帧、legacy sound ID、Wwise Event ID 及方向一致性并
+写入 manifest。Wwise Runtime 接入应位于 Recoil 声音系统或独立 AOE Audio Bridge，
+不应放进 Sprite/Projectile Renderer。
+
+相关源码：
+
+- `rts/System/Sound/`：Recoil 当前 OpenAL 声音后端；
+- `rts/Sim/Weapons/WeaponDef.cpp`：WeaponDef 声音字段加载；
+- `rts/Sim/Weapons/Weapon.cpp`：开火时播放 `fireSound`；
+- `rts/Game/GameHelper.cpp`：命中爆炸时播放 dry/wet `hitSound`；
+- gld `tools/aoe2de_export/aoe2de_export.py`：当前 DAT/Graphic manifest 导出路径，尚未序列化 `angle_sounds`。

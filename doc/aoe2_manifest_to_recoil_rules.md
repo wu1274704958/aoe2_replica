@@ -163,6 +163,8 @@ resurrectable = 0,
 - `duration_seconds` 控制实例回收；运行时不得通过猜测 FPS 重算生命周期。
 - `scale`、`alpha` 是资源级默认值；`anchor` 必须使用 exporter 记录的原始画布中心。
 - Effect 只负责非同步视觉，命中位置、LOS、伤害和范围爆炸仍由 Recoil Gameplay 决定。
+- `direction_count > 1` 的 Effect 使用 Explosion 事件的水平 `dir` 选择方向；水平分量为
+  零时稳定回退到方向 0。方向只影响 Sprite 采样，不参与伤害或碰撞。
 - 可选实例覆盖使用以下 WeaponDef 字段：
 
 ```lua
@@ -194,7 +196,7 @@ Projectile 类型判断或零散常量修正位置。当前 `smoke_hit` 使用 A
 | `combat.blast_width` | `areaOfEffect` | 当前按直径 `blast_width * 2 * 60` 近似 |
 | projectile speed | `weaponVelocity` | `speed * 60` 起始值，必须进行弹道校准 |
 | `projectile_arc` | `myGravity` | 不是无损一一映射；必须按 Projectile 类型校准 |
-| projectile count | `burst`/原生多弹道 | 仅静态连发可直接映射；驻军等动态数量需 Gameplay 支持 |
+| projectile count | `burst`/原生多弹道 | 固定数量可映射；主/副弹伤害不同时用 `burst` + `aoeSalvoDamage`，驻军等动态数量需 Gameplay 支持 |
 
 以下字段不能机械直译：
 
@@ -203,7 +205,10 @@ Projectile 类型判断或零散常量修正位置。当前 `smoke_hit` 使用 A
   `friendly_fire_damage` 暂时只能用 Recoil 原生范围伤害近似。
 - `projectile_arc` 不能通过 `highTrajectory` 模拟；应使用合适的原生 Projectile 类型、
   `weaponVelocity` 和重力校准。
-- `projectile_min_count/max_count` 可能依赖驻军或额外 Gameplay，不能一律当作固定 `burst`。
+- `projectile_min_count/max_count` 相等且不受驻军/科技改变时可映射为固定 `burst` 或
+  `projectiles`。若 `secondary_projectile_unit_id` 使用自己的 Attack 数组，必须用
+  `aoeSalvoDamage` 分开主弹与副弹伤害；不得让所有 Projectile 继承主弹完整伤害。
+  `projectile_min_count/max_count` 不相等时可能依赖驻军或额外 Gameplay，不能直接固化。
 
 ## AOE 护甲与伤害类别
 

@@ -37,6 +37,13 @@
 
 ## 攻城器额外语义
 
-- 小型抛石机需要核对 AoE 范围伤害、友伤、辅助投射物和 Recoil `areaOfEffect` 的精确差异。
+- 小型抛石机（DAT 280）已生成可运行 Def：固定 6 枚石弹使用一帧间隔的原生
+  `burst`，首枚继承 DAT 280 的完整 Attack 数组，后五枚通过 `aoeSalvoDamage` 使用
+  Secondary Projectile DAT 369 的最低 1 点 fallback；主/副 Projectile 实际引用同一
+  `p_mangonel_x1` 图像，因此共享一个 60 FPS `time_loop` 渲染资源。`impact_dust` 已从
+  16 方向 TexturePacker 粒子图集导出并接入命中视觉。
+- 小型抛石机仍需人工校准 `projectile_arc=0.4` 对应的 Recoil 重力，以及 DAT 1x1、
+  randomness=99 的发射区域与当前 `sprayAngle` 近似。AoE blast level、友伤和
+  Recoil `areaOfEffect` 的边界差异也仍属严格复刻缺口，不影响当前原生 Gameplay 闭环。
 - 未展开投石机仅有静态资源；严格接入需要 Pack/Unpack 状态、移动限制及相应动画/资源状态机。
-- 手推炮已经生成可测试 Def；小型抛石机和未展开投石机仍等待各自的辅助投射物/展开状态语义后再接入。
+- 手推炮和小型抛石机已经生成可测试 Def；未展开投石机仍等待展开状态语义后再接入。
